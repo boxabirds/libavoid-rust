@@ -1,0 +1,22 @@
+[package]
+name = "libavoid"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ported from C++ libavoid by Michael Wybrow"]
+license = "LGPL-2.1"
+description = "Fast, object-avoiding connector routing for interactive diagram editors"
+repository = "https://github.com/mjwybrow/adaptagrams"
+keywords = ["routing", "pathfinding", "diagrams", "connectors", "orthogonal"]
+categories = ["algorithms", "graphics"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[lib]
+name = "libavoid"
+path = "src/lib.rs"
+
+[[example]]
+name = "simple_routing"
+path = "examples/simple_routing.rs"
