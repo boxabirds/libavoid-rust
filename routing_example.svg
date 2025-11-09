@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="340" height="365" xmlns="http://www.w3.org/2000/svg">
   <polygon points="190,90 290,90 290,170 190,170 " fill="lightblue" stroke="black" stroke-width="1"/>
-  <polygon points="50,50 130,50 130,110 50,110 " fill="lightblue" stroke="black" stroke-width="1"/>
   <polygon points="155,245 225,245 225,315 155,315 " fill="lightblue" stroke="black" stroke-width="1"/>
-  <polyline points="40,180 215,280 390,180 " fill="none" stroke="red" stroke-width="2"/>
-  <polyline points="140,30 140,130 140,380 " fill="none" stroke="red" stroke-width="2"/>
-  <polyline points="40,30 190,130 340,330 " fill="none" stroke="red" stroke-width="2"/>
+  <polygon points="50,50 130,50 130,110 50,110 " fill="lightblue" stroke="black" stroke-width="1"/>
+  <polyline points="140,30 140,380 " fill="none" stroke="red" stroke-width="2"/>
+  <polyline points="40,30 340,330 " fill="none" stroke="red" stroke-width="2"/>
+  <polyline points="40,180 390,180 " fill="none" stroke="red" stroke-width="2"/>
 </svg>
