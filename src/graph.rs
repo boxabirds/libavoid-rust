@@ -3,7 +3,7 @@
 //! This module implements A* and other pathfinding algorithms used to find
 //! optimal routes through the visibility graph.
 
-use crate::geometry::{Point, Polygon, PolygonInterface};
+use crate::geometry::{Point, Polygon};
 use crate::visibility::VisibilityGraph;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::cmp::Ordering;

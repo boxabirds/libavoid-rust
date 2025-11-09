@@ -323,33 +323,63 @@ impl Router {
     }
 
     /// Routes using polyline (direct path through visibility graph)
-    fn route_polyline(&self, src: Point, dst: Point) -> Polygon {
-        // For simple implementation: direct line if no obstacles in the way
-        // In a full implementation, this would use the visibility graph
-
+    fn route_polyline(&mut self, src: Point, dst: Point) -> Polygon {
         let obstacles: Vec<&dyn Obstacle> = self.shapes.values()
             .map(|s| s as &dyn Obstacle)
             .collect();
 
-        // Simple direct route if clear
-        let mut route = Polygon::new();
-        route.push(src);
-
-        // Check if direct path is clear
+        // Check if direct path is clear first (optimization)
         if self.is_direct_path_clear(&src, &dst, &obstacles) {
+            let mut route = Polygon::new();
+            route.push(src);
             route.push(dst);
-        } else {
-            // Add waypoint to avoid obstacles (simple implementation)
-            let mid = Point::new((src.x + dst.x) / 2.0, src.y + 100.0);
-            route.push(mid);
-            route.push(dst);
+            return route;
         }
+
+        // Add temporary vertices for source and destination
+        let src_id = self.vis_graph.add_vertex(src);
+        let dst_id = self.vis_graph.add_vertex(dst);
+
+        // Compute visibility for the new vertices
+        self.vis_graph.compute_vertex_visibility(src_id, &obstacles);
+        self.vis_graph.compute_vertex_visibility(dst_id, &obstacles);
+
+        // Find path using A*
+        let path_result = self.path_finder.find_path(&self.vis_graph, src_id, dst_id);
+
+        // Convert path to polygon (before removing temporary vertices)
+        let route = if let Some(path) = path_result {
+            // Reconstruct polygon from path vertex IDs
+            let mut route = Polygon::new();
+            route.push(src);
+
+            // Add intermediate waypoints (skip first and last as they are src/dst)
+            for i in 1..path.len().saturating_sub(1) {
+                if let Some(vertex) = self.vis_graph.get_vertex(path[i]) {
+                    route.push(vertex.point);
+                }
+            }
+
+            route.push(dst);
+            route.simplify();
+            route
+        } else {
+            // No path found through visibility graph, use direct path as fallback
+            let mut route = Polygon::new();
+            route.push(src);
+            route.push(dst);
+            route
+        };
+
+        // Remove temporary vertices
+        self.vis_graph.remove_vertex(src_id);
+        self.vis_graph.remove_vertex(dst_id);
 
         route
     }
 
     /// Routes using orthogonal segments
-    fn route_orthogonal(&self, src: Point, dst: Point) -> Polygon {
+    fn route_orthogonal(&mut self, src: Point, dst: Point) -> Polygon {
         let obstacles: Vec<&dyn Obstacle> = self.shapes.values()
             .map(|s| s as &dyn Obstacle)
             .collect();
