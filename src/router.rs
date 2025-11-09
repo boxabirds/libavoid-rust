@@ -36,6 +36,12 @@ pub enum RoutingParameter {
     IdealNudgingDistance,
     /// Shape buffer distance
     ShapeBufferDistance,
+    /// Penalty for fixed shared path segments
+    FixedSharedPathPenalty,
+    /// Penalty for wrong port directions
+    PortDirectionPenalty,
+    /// Penalty for reverse direction routing
+    ReverseDirectionPenalty,
 }
 
 /// Routing options

@@ -48,6 +48,11 @@ pub mod shape;
 pub mod visibility;
 pub mod graph;
 pub mod orthogonal;
+pub mod junction;
+pub mod hyperedge;
+
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 // Re-export commonly used types
 pub use geometry::{Point, Box as BBox, Polygon, Rectangle, Edge, PolygonInterface};
@@ -55,6 +60,8 @@ pub use router::{Router, RouterFlags, RoutingParameter, RoutingOption};
 pub use connector::{ConnRef, ConnEnd, ConnType};
 pub use obstacle::Obstacle;
 pub use shape::ShapeRef;
+pub use junction::JunctionRef;
+pub use hyperedge::{HyperedgeRef, HyperedgeRerouter};
 
 /// Dimension constants
 pub const XDIM: usize = 0;
