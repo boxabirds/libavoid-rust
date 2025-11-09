@@ -324,33 +324,68 @@ impl PolygonInterface for Polygon {
     }
 
     fn offset_polygon(&self, offset: f64) -> Polygon {
-        // Simple implementation: offset each point outward from centroid
-        let mut result = self.clone();
+        // Proper polygon offsetting using edge normals
+        let mut result = Polygon::with_id(self.id);
 
-        if self.ps.is_empty() {
-            return result;
+        let n = self.ps.len();
+        if n < 3 {
+            // For degenerate polygons, just return a copy
+            return self.clone();
         }
 
-        // Calculate centroid
-        let mut cx = 0.0;
-        let mut cy = 0.0;
-        for p in &self.ps {
-            cx += p.x;
-            cy += p.y;
-        }
-        cx /= self.ps.len() as f64;
-        cy /= self.ps.len() as f64;
-        let centroid = Point::new(cx, cy);
+        // For each vertex, compute the offset based on the normals of adjacent edges
+        for i in 0..n {
+            let prev_i = if i == 0 { n - 1 } else { i - 1 };
+            let next_i = if i == n - 1 { 0 } else { i + 1 };
 
-        // Offset each point away from centroid
-        for p in &mut result.ps {
-            let dx = p.x - centroid.x;
-            let dy = p.y - centroid.y;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > 1e-10 {
-                p.x += (dx / dist) * offset;
-                p.y += (dy / dist) * offset;
+            let prev = &self.ps[prev_i];
+            let curr = &self.ps[i];
+            let next = &self.ps[next_i];
+
+            // Compute edge vectors
+            let edge1_x = curr.x - prev.x;
+            let edge1_y = curr.y - prev.y;
+            let edge2_x = next.x - curr.x;
+            let edge2_y = next.y - curr.y;
+
+            // Compute perpendicular normals (rotate 90° clockwise for outward)
+            // For a typical clockwise wound polygon, outward is to the right
+            let mut normal1_x = edge1_y;
+            let mut normal1_y = -edge1_x;
+            let mut normal2_x = edge2_y;
+            let mut normal2_y = -edge2_x;
+
+            // Normalize the normals
+            let len1 = (normal1_x * normal1_x + normal1_y * normal1_y).sqrt();
+            if len1 > 1e-10 {
+                normal1_x /= len1;
+                normal1_y /= len1;
             }
+
+            let len2 = (normal2_x * normal2_x + normal2_y * normal2_y).sqrt();
+            if len2 > 1e-10 {
+                normal2_x /= len2;
+                normal2_y /= len2;
+            }
+
+            // Average the normals
+            let avg_normal_x = (normal1_x + normal2_x) * 0.5;
+            let avg_normal_y = (normal1_y + normal2_y) * 0.5;
+
+            // Normalize the averaged normal
+            let avg_len = (avg_normal_x * avg_normal_x + avg_normal_y * avg_normal_y).sqrt();
+            let (final_normal_x, final_normal_y) = if avg_len > 1e-10 {
+                (avg_normal_x / avg_len, avg_normal_y / avg_len)
+            } else {
+                (normal1_x, normal1_y)
+            };
+
+            // Offset the vertex
+            let new_point = Point::new(
+                curr.x + final_normal_x * offset,
+                curr.y + final_normal_y * offset,
+            );
+            result.push(new_point);
         }
 
         result
