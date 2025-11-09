@@ -43,6 +43,8 @@ pub struct OrthogonalRouter {
     bend_penalty: f64,
     /// Routing penalty for segment length
     segment_penalty: f64,
+    /// Nudging distance for separating overlapping segments
+    nudge_distance: f64,
 }
 
 impl OrthogonalRouter {
@@ -51,6 +53,7 @@ impl OrthogonalRouter {
         OrthogonalRouter {
             bend_penalty: 50.0,
             segment_penalty: 1.0,
+            nudge_distance: 4.0,
         }
     }
 
@@ -59,7 +62,100 @@ impl OrthogonalRouter {
         OrthogonalRouter {
             bend_penalty,
             segment_penalty,
+            nudge_distance: 4.0,
         }
+    }
+
+    /// Sets the nudging distance
+    pub fn set_nudge_distance(&mut self, distance: f64) {
+        self.nudge_distance = distance;
+    }
+
+    /// Nudges a route to avoid overlapping with existing routes
+    pub fn nudge_route(&self, route: &mut Polygon, existing_routes: &[&Polygon]) {
+        if route.size() < 2 {
+            return;
+        }
+
+        // For each segment in the route
+        for i in 0..route.size() - 1 {
+            let p1 = *route.at(i);
+            let p2 = *route.at(i + 1);
+
+            // Check if this segment is orthogonal
+            let is_horizontal = (p1.y - p2.y).abs() < 1e-6;
+            let is_vertical = (p1.x - p2.x).abs() < 1e-6;
+
+            if !is_horizontal && !is_vertical {
+                continue;
+            }
+
+            // Check for overlap with existing routes
+            for existing in existing_routes {
+                if self.segments_overlap(&p1, &p2, existing) {
+                    // Nudge perpendicular to segment direction
+                    let nudge = if is_horizontal {
+                        Point::new(0.0, self.nudge_distance)
+                    } else {
+                        Point::new(self.nudge_distance, 0.0)
+                    };
+
+                    // Apply nudge to this segment
+                    route.set_point(i, p1 + nudge);
+                    route.set_point(i + 1, p2 + nudge);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Checks if a segment overlaps with any segment in an existing route
+    fn segments_overlap(&self, p1: &Point, p2: &Point, existing: &Polygon) -> bool {
+        if existing.size() < 2 {
+            return false;
+        }
+
+        let is_horizontal = (p1.y - p2.y).abs() < 1e-6;
+
+        for i in 0..existing.size() - 1 {
+            let e1 = existing.at(i);
+            let e2 = existing.at(i + 1);
+
+            let e_is_horizontal = (e1.y - e2.y).abs() < 1e-6;
+
+            // Only check segments with same orientation
+            if is_horizontal != e_is_horizontal {
+                continue;
+            }
+
+            if is_horizontal {
+                // Check horizontal overlap
+                if (p1.y - e1.y).abs() < self.nudge_distance {
+                    let min_x1 = p1.x.min(p2.x);
+                    let max_x1 = p1.x.max(p2.x);
+                    let min_x2 = e1.x.min(e2.x);
+                    let max_x2 = e1.x.max(e2.x);
+
+                    if min_x1 <= max_x2 && max_x1 >= min_x2 {
+                        return true;
+                    }
+                }
+            } else {
+                // Check vertical overlap
+                if (p1.x - e1.x).abs() < self.nudge_distance {
+                    let min_y1 = p1.y.min(p2.y);
+                    let max_y1 = p1.y.max(p2.y);
+                    let min_y2 = e1.y.min(e2.y);
+                    let max_y2 = e1.y.max(e2.y);
+
+                    if min_y1 <= max_y2 && max_y1 >= min_y2 {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     /// Routes an orthogonal path between two points
@@ -99,8 +195,8 @@ impl OrthogonalRouter {
             }
             poly.push(end);
         } else {
-            // Simple fallback: add offset
-            let offset = 20.0;
+            // Find clear channel using binary search
+            let offset = self.find_clear_channel(start, end, obstacles, true);
             let mid1 = Point::new(start.x + offset, start.y);
             let mid2 = Point::new(start.x + offset, end.y);
             let mid3 = Point::new(end.x, end.y);
@@ -129,8 +225,8 @@ impl OrthogonalRouter {
             }
             poly.push(end);
         } else {
-            // Simple fallback: add offset
-            let offset = 20.0;
+            // Find clear channel using binary search
+            let offset = self.find_clear_channel(start, end, obstacles, false);
             let mid1 = Point::new(start.x, start.y + offset);
             let mid2 = Point::new(end.x, start.y + offset);
             let mid3 = Point::new(end.x, end.y);
@@ -142,6 +238,70 @@ impl OrthogonalRouter {
         }
 
         poly
+    }
+
+    /// Find a clear channel by scanning for gaps between obstacles
+    fn find_clear_channel(&self, start: Point, end: Point, obstacles: &[&dyn Obstacle], horizontal: bool) -> f64 {
+        // Scan obstacles to find channels
+        let mut channels = Vec::new();
+
+        if horizontal {
+            // Find vertical channels (gaps along X axis)
+            let min_x = start.x.min(end.x);
+            let max_x = start.x.max(end.x);
+
+            // Collect obstacle boundaries in X range
+            let mut boundaries = vec![min_x, max_x];
+            for obstacle in obstacles {
+                let bbox = obstacle.polygon().bounding_rect();
+                if bbox.max.x >= min_x && bbox.min.x <= max_x {
+                    boundaries.push(bbox.min.x);
+                    boundaries.push(bbox.max.x);
+                }
+            }
+            boundaries.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            // Find gaps between boundaries
+            for i in 0..boundaries.len() - 1 {
+                let gap_center = (boundaries[i] + boundaries[i + 1]) / 2.0;
+                let gap_x = gap_center - start.x;
+
+                // Check if this channel is clear
+                let test_start = Point::new(gap_center, start.y);
+                let test_end = Point::new(gap_center, end.y);
+                if self.is_path_clear(&test_start, &test_end, obstacles) {
+                    channels.push(gap_x);
+                }
+            }
+        } else {
+            // Find horizontal channels (gaps along Y axis)
+            let min_y = start.y.min(end.y);
+            let max_y = start.y.max(end.y);
+
+            let mut boundaries = vec![min_y, max_y];
+            for obstacle in obstacles {
+                let bbox = obstacle.polygon().bounding_rect();
+                if bbox.max.y >= min_y && bbox.min.y <= max_y {
+                    boundaries.push(bbox.min.y);
+                    boundaries.push(bbox.max.y);
+                }
+            }
+            boundaries.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            for i in 0..boundaries.len() - 1 {
+                let gap_center = (boundaries[i] + boundaries[i + 1]) / 2.0;
+                let gap_y = gap_center - start.y;
+
+                let test_start = Point::new(start.x, gap_center);
+                let test_end = Point::new(end.x, gap_center);
+                if self.is_path_clear(&test_start, &test_end, obstacles) {
+                    channels.push(gap_y);
+                }
+            }
+        }
+
+        // Return the first clear channel, or small offset if none found
+        channels.into_iter().next().unwrap_or(20.0)
     }
 
     /// Checks if a path between two points is clear of obstacles

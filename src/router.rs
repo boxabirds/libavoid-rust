@@ -116,13 +116,16 @@ impl Router {
             next_connector_id: 1,
         };
 
-        // Set default parameters
+        // Set default parameters (matching C++ libavoid defaults)
         router.parameters.insert(RoutingParameter::SegmentPenalty, 1.0);
         router.parameters.insert(RoutingParameter::BendPenalty, 50.0);
         router.parameters.insert(RoutingParameter::CrossingPenalty, 0.0);
         router.parameters.insert(RoutingParameter::ClusterCrossingPenalty, 4000.0);
         router.parameters.insert(RoutingParameter::IdealNudgingDistance, 4.0);
         router.parameters.insert(RoutingParameter::ShapeBufferDistance, 8.0);
+        router.parameters.insert(RoutingParameter::FixedSharedPathPenalty, 110.0);
+        router.parameters.insert(RoutingParameter::PortDirectionPenalty, 100.0);
+        router.parameters.insert(RoutingParameter::ReverseDirectionPenalty, 50.0);
 
         // Set default options
         router.options.insert(RoutingOption::NudgeOrthogonalRoutes, false);
@@ -390,7 +393,28 @@ impl Router {
             .map(|s| s as &dyn Obstacle)
             .collect();
 
-        self.orthogonal_router.route_orthogonal(src, dst, &obstacles)
+        let mut route = self.orthogonal_router.route_orthogonal(src, dst, &obstacles);
+
+        // Apply nudging if option is enabled
+        if self.routing_option(RoutingOption::NudgeOrthogonalRoutes) {
+            // Get existing orthogonal routes for nudging
+            let existing_routes: Vec<&Polygon> = self.connectors.values()
+                .filter_map(|c| {
+                    if c.routing_type() == ConnType::Orthogonal {
+                        c.display_route()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Apply nudging
+            let nudge_distance = self.routing_parameter(RoutingParameter::IdealNudgingDistance);
+            self.orthogonal_router.set_nudge_distance(nudge_distance);
+            self.orthogonal_router.nudge_route(&mut route, &existing_routes);
+        }
+
+        route
     }
 
     /// Checks if a direct path is clear
