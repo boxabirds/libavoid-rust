@@ -200,6 +200,7 @@ pub fn compute_path_cost(graph: &VisibilityGraph, path: &[u32]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::PolygonInterface;
 
     #[test]
     fn test_pathfinder_creation() {
