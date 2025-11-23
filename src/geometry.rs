@@ -693,6 +693,147 @@ pub fn segment_intersects_polygon_interior(p1: &Point, p2: &Point, polygon: &Pol
     point_in_polygon(&mid, polygon)
 }
 
+// ============================================================================
+// Connector Crossing Detection
+// ============================================================================
+
+/// Result of a crossing detection between two polyline routes
+#[derive(Debug, Clone)]
+pub struct CrossingInfo {
+    /// Index of the segment in the first route where crossing occurs
+    pub route1_segment: usize,
+    /// Index of the segment in the second route where crossing occurs
+    pub route2_segment: usize,
+    /// The point where the crossing occurs
+    pub crossing_point: Point,
+}
+
+/// Counts the number of crossings between two polyline routes.
+/// A crossing occurs when segments from different routes intersect
+/// at a point that is not a shared endpoint.
+pub fn count_route_crossings(route1: &Polygon, route2: &Polygon) -> usize {
+    let mut count = 0;
+
+    if route1.size() < 2 || route2.size() < 2 {
+        return 0;
+    }
+
+    for i in 0..route1.size() - 1 {
+        let a1 = route1.at(i);
+        let a2 = route1.at(i + 1);
+
+        for j in 0..route2.size() - 1 {
+            let b1 = route2.at(j);
+            let b2 = route2.at(j + 1);
+
+            if segments_intersect_proper(a1, a2, b1, b2) {
+                count += 1;
+            }
+        }
+    }
+
+    count
+}
+
+/// Finds all crossings between two polyline routes.
+pub fn find_route_crossings(route1: &Polygon, route2: &Polygon) -> Vec<CrossingInfo> {
+    let mut crossings = Vec::new();
+
+    if route1.size() < 2 || route2.size() < 2 {
+        return crossings;
+    }
+
+    for i in 0..route1.size() - 1 {
+        let a1 = route1.at(i);
+        let a2 = route1.at(i + 1);
+
+        for j in 0..route2.size() - 1 {
+            let b1 = route2.at(j);
+            let b2 = route2.at(j + 1);
+
+            if let Some(point) = segment_intersection_point(a1, a2, b1, b2) {
+                // Only count proper crossings, not shared endpoints
+                if !point.equals(a1) && !point.equals(a2) && !point.equals(b1) && !point.equals(b2) {
+                    crossings.push(CrossingInfo {
+                        route1_segment: i,
+                        route2_segment: j,
+                        crossing_point: point,
+                    });
+                }
+            }
+        }
+    }
+
+    crossings
+}
+
+/// Checks if two segments have a proper intersection (cross each other,
+/// not just touching at endpoints).
+pub fn segments_intersect_proper(a1: &Point, a2: &Point, b1: &Point, b2: &Point) -> bool {
+    // Skip if segments share an endpoint
+    if a1.equals(b1) || a1.equals(b2) || a2.equals(b1) || a2.equals(b2) {
+        return false;
+    }
+
+    let d1 = ccw(a1, a2, b1);
+    let d2 = ccw(a1, a2, b2);
+    let d3 = ccw(b1, b2, a1);
+    let d4 = ccw(b1, b2, a2);
+
+    // Proper crossing requires opposite signs on both sides
+    if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
+        return true;
+    }
+
+    false
+}
+
+/// Computes the intersection point of two line segments, if they intersect.
+pub fn segment_intersection_point(a1: &Point, a2: &Point, b1: &Point, b2: &Point) -> Option<Point> {
+    let d1 = ccw(a1, a2, b1);
+    let d2 = ccw(a1, a2, b2);
+    let d3 = ccw(b1, b2, a1);
+    let d4 = ccw(b1, b2, a2);
+
+    // Check if segments intersect
+    if !((d1 * d2 < 0.0 && d3 * d4 < 0.0) ||
+         (d1 == 0.0 && on_segment(a1, b1, a2)) ||
+         (d2 == 0.0 && on_segment(a1, b2, a2)) ||
+         (d3 == 0.0 && on_segment(b1, a1, b2)) ||
+         (d4 == 0.0 && on_segment(b1, a2, b2))) {
+        return None;
+    }
+
+    // Compute intersection point using parametric form
+    let dx1 = a2.x - a1.x;
+    let dy1 = a2.y - a1.y;
+    let dx2 = b2.x - b1.x;
+    let dy2 = b2.y - b1.y;
+
+    let denom = dx1 * dy2 - dy1 * dx2;
+
+    if denom.abs() < 1e-10 {
+        // Parallel or collinear - return midpoint of overlap if any
+        return None;
+    }
+
+    let dx3 = b1.x - a1.x;
+    let dy3 = b1.y - a1.y;
+
+    let t = (dx3 * dy2 - dy3 * dx2) / denom;
+
+    Some(Point::new(a1.x + t * dx1, a1.y + t * dy1))
+}
+
+/// Counts total crossings of a connector route with all other routes.
+pub fn count_connector_crossings(route: &Polygon, other_routes: &[&Polygon]) -> usize {
+    let mut total = 0;
+    for other in other_routes {
+        total += count_route_crossings(route, other);
+    }
+    total
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,11 +6,13 @@
 use crate::geometry::{Polygon, Point, PolygonInterface};
 use crate::connector::{ConnRef, ConnEnd, ConnType};
 use crate::shape::ShapeRef;
+use crate::junction::JunctionRef;
 use crate::obstacle::Obstacle;
 use crate::visibility::VisibilityGraph;
 use crate::graph::PathFinder;
 use crate::orthogonal::OrthogonalRouter;
-use std::collections::HashMap;
+use crate::action::{ActionInfo, ActionType};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Router flags for initialization
 pub type RouterFlags = u32;
@@ -63,6 +65,8 @@ pub struct Router {
     flags: RouterFlags,
     /// All shapes in the scene
     shapes: HashMap<u32, ShapeRef>,
+    /// All junctions in the scene
+    junctions: HashMap<u32, JunctionRef>,
     /// All connectors in the scene
     connectors: HashMap<u32, ConnRef>,
     /// Visibility graph for polyline routing
@@ -79,15 +83,23 @@ pub struct Router {
     options: HashMap<RoutingOption, bool>,
     /// Transaction mode enabled
     transaction_mode: bool,
-    /// Pending operations in transaction
+    /// Pending operations in transaction (legacy)
     transaction_pending: Vec<TransactionOp>,
+    /// Action queue for transaction processing
+    action_queue: VecDeque<ActionInfo>,
+    /// Connectors that need rerouting
+    reroute_queue: HashSet<u32>,
+    /// Whether visibility graph needs rebuilding
+    needs_vis_rebuild: bool,
     /// Next shape ID
     next_shape_id: u32,
     /// Next connector ID
     next_connector_id: u32,
+    /// Next junction ID
+    next_junction_id: u32,
 }
 
-/// Transaction operation types
+/// Transaction operation types (legacy, kept for backwards compatibility)
 #[derive(Debug, Clone)]
 enum TransactionOp {
     AddShape(u32),
@@ -95,6 +107,9 @@ enum TransactionOp {
     MoveShape(u32, Point),
     AddConnector(u32),
     DeleteConnector(u32),
+    AddJunction(u32),
+    DeleteJunction(u32),
+    MoveJunction(u32, Point),
 }
 
 impl Router {
@@ -103,6 +118,7 @@ impl Router {
         let mut router = Router {
             flags,
             shapes: HashMap::new(),
+            junctions: HashMap::new(),
             connectors: HashMap::new(),
             vis_graph: VisibilityGraph::new(),
             vis_orth_graph: VisibilityGraph::new(),
@@ -112,8 +128,12 @@ impl Router {
             options: HashMap::new(),
             transaction_mode: (flags & ROUTER_FLAG_USE_TRANSACTIONS) != 0,
             transaction_pending: Vec::new(),
+            action_queue: VecDeque::new(),
+            reroute_queue: HashSet::new(),
+            needs_vis_rebuild: false,
             next_shape_id: 1,
             next_connector_id: 1,
+            next_junction_id: 1,
         };
 
         // Set default parameters
@@ -240,6 +260,155 @@ impl Router {
         self.shapes.get(&shape_id)
     }
 
+    // ========================================================================
+    // Junction Management
+    // ========================================================================
+
+    /// Adds a junction at the given position
+    pub fn add_junction(&mut self, position: Point, id: u32) -> u32 {
+        let junction_id = if id == 0 {
+            let id = self.next_junction_id;
+            self.next_junction_id += 1;
+            id
+        } else {
+            if id >= self.next_junction_id {
+                self.next_junction_id = id + 1;
+            }
+            id
+        };
+
+        let junction = JunctionRef::new(junction_id, position);
+        self.junctions.insert(junction_id, junction);
+
+        if self.transaction_mode {
+            self.transaction_pending.push(TransactionOp::AddJunction(junction_id));
+            self.action_queue.push_back(ActionInfo::junction_add(junction_id));
+            self.needs_vis_rebuild = true;
+        } else {
+            self.rebuild_visibility_graph();
+        }
+
+        junction_id
+    }
+
+    /// Deletes a junction from the router
+    pub fn delete_junction(&mut self, junction_id: u32) {
+        // Detach all connectors from this junction
+        if let Some(junction) = self.junctions.get(&junction_id) {
+            let attached: Vec<u32> = junction.attached_connectors().iter().copied().collect();
+            for conn_id in attached {
+                self.reroute_queue.insert(conn_id);
+            }
+        }
+
+        self.junctions.remove(&junction_id);
+
+        if self.transaction_mode {
+            self.transaction_pending.push(TransactionOp::DeleteJunction(junction_id));
+            self.action_queue.push_back(ActionInfo::junction_remove(junction_id));
+            self.needs_vis_rebuild = true;
+        } else {
+            self.rebuild_visibility_graph();
+        }
+    }
+
+    /// Moves a junction to a new position
+    pub fn move_junction(&mut self, junction_id: u32, new_position: Point) {
+        if let Some(junction) = self.junctions.get_mut(&junction_id) {
+            junction.set_position(new_position);
+
+            // Mark attached connectors for reroute
+            for conn_id in junction.attached_connectors() {
+                self.reroute_queue.insert(*conn_id);
+            }
+
+            if self.transaction_mode {
+                self.transaction_pending.push(TransactionOp::MoveJunction(junction_id, new_position));
+                self.action_queue.push_back(ActionInfo::junction_move(junction_id, new_position));
+            } else {
+                self.rebuild_visibility_graph();
+                self.reroute_all_connectors();
+            }
+        }
+    }
+
+    /// Gets a junction by ID
+    pub fn get_junction(&self, junction_id: u32) -> Option<&JunctionRef> {
+        self.junctions.get(&junction_id)
+    }
+
+    /// Gets a mutable junction by ID
+    pub fn get_junction_mut(&mut self, junction_id: u32) -> Option<&mut JunctionRef> {
+        self.junctions.get_mut(&junction_id)
+    }
+
+    /// Returns all junctions
+    pub fn junctions(&self) -> impl Iterator<Item = &JunctionRef> {
+        self.junctions.values()
+    }
+
+    // ========================================================================
+    // Connector Reroute Queue
+    // ========================================================================
+
+    /// Marks a connector as needing rerouting
+    pub fn mark_connector_for_reroute(&mut self, conn_id: u32) {
+        self.reroute_queue.insert(conn_id);
+    }
+
+    /// Processes the reroute queue
+    fn process_reroute_queue(&mut self) {
+        let queue: Vec<u32> = self.reroute_queue.drain().collect();
+        for conn_id in queue {
+            self.route_connector(conn_id);
+        }
+    }
+
+    // ========================================================================
+    // Action Queue Processing
+    // ========================================================================
+
+    /// Adds an action to the queue
+    pub fn queue_action(&mut self, action: ActionInfo) {
+        let action_type = action.action_type;
+        let connector_id = action.connector_id;
+        self.action_queue.push_back(action);
+
+        match action_type {
+            ActionType::ShapeAdd | ActionType::ShapeRemove | ActionType::ShapeMove |
+            ActionType::JunctionAdd | ActionType::JunctionRemove | ActionType::JunctionMove => {
+                self.needs_vis_rebuild = true;
+            }
+            ActionType::ConnectorChange => {
+                if let Some(conn_id) = connector_id {
+                    self.reroute_queue.insert(conn_id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Processes the action queue
+    fn process_action_queue(&mut self) {
+        let actions: Vec<ActionInfo> = self.action_queue.drain(..).collect();
+
+        for action in actions {
+            match action.action_type {
+                ActionType::ConnectorAdd => {
+                    if let Some(conn_id) = action.connector_id {
+                        self.reroute_queue.insert(conn_id);
+                    }
+                }
+                ActionType::ConnectorChange => {
+                    if let Some(conn_id) = action.connector_id {
+                        self.reroute_queue.insert(conn_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Sets a routing parameter
     pub fn set_routing_parameter(&mut self, param: RoutingParameter, value: f64) {
         self.parameters.insert(param, value);
@@ -286,17 +455,32 @@ impl Router {
         // Process all pending operations
         let ops = std::mem::take(&mut self.transaction_pending);
 
-        // Rebuild visibility graph once for all shape changes
-        let has_shape_ops = ops.iter().any(|op| matches!(op,
-            TransactionOp::AddShape(_) | TransactionOp::DeleteShape(_) | TransactionOp::MoveShape(_, _)
+        // Rebuild visibility graph once for all shape/junction changes
+        let has_obstacle_ops = ops.iter().any(|op| matches!(op,
+            TransactionOp::AddShape(_) | TransactionOp::DeleteShape(_) | TransactionOp::MoveShape(_, _) |
+            TransactionOp::AddJunction(_) | TransactionOp::DeleteJunction(_) | TransactionOp::MoveJunction(_, _)
         ));
 
-        if has_shape_ops {
+        // Process action queue
+        self.process_action_queue();
+
+        // Rebuild visibility graph if needed
+        if has_obstacle_ops || self.needs_vis_rebuild {
             self.rebuild_visibility_graph();
+            self.needs_vis_rebuild = false;
+            // After rebuilding, all connectors need rerouting
+            for conn_id in self.connectors.keys() {
+                self.reroute_queue.insert(*conn_id);
+            }
         }
 
-        // Reroute all connectors
-        self.reroute_all_connectors();
+        // Process the reroute queue
+        if !self.reroute_queue.is_empty() {
+            self.process_reroute_queue();
+        } else {
+            // Fallback: reroute all connectors if nothing in queue
+            self.reroute_all_connectors();
+        }
     }
 
     /// Routes a single connector

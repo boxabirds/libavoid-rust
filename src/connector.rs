@@ -6,6 +6,50 @@
 use crate::geometry::{Point, Polygon, PolygonInterface};
 use std::sync::Arc;
 
+// ============================================================================
+// Connection Direction Flags
+// ============================================================================
+
+/// Direction flags for connection pins and endpoints
+pub type ConnDirFlags = u32;
+
+/// No direction allowed
+pub const CONN_DIR_NONE: ConnDirFlags = 0;
+/// Up direction (negative Y)
+pub const CONN_DIR_UP: ConnDirFlags = 1;
+/// Down direction (positive Y)
+pub const CONN_DIR_DOWN: ConnDirFlags = 2;
+/// Left direction (negative X)
+pub const CONN_DIR_LEFT: ConnDirFlags = 4;
+/// Right direction (positive X)
+pub const CONN_DIR_RIGHT: ConnDirFlags = 8;
+/// All directions allowed
+pub const CONN_DIR_ALL: ConnDirFlags = 15;
+
+/// Check if direction flags include up
+pub fn has_dir_up(flags: ConnDirFlags) -> bool {
+    flags & CONN_DIR_UP != 0
+}
+
+/// Check if direction flags include down
+pub fn has_dir_down(flags: ConnDirFlags) -> bool {
+    flags & CONN_DIR_DOWN != 0
+}
+
+/// Check if direction flags include left
+pub fn has_dir_left(flags: ConnDirFlags) -> bool {
+    flags & CONN_DIR_LEFT != 0
+}
+
+/// Check if direction flags include right
+pub fn has_dir_right(flags: ConnDirFlags) -> bool {
+    flags & CONN_DIR_RIGHT != 0
+}
+
+// ============================================================================
+// Connector Type
+// ============================================================================
+
 /// Type of connector routing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnType {
@@ -21,12 +65,49 @@ impl Default for ConnType {
     }
 }
 
+// ============================================================================
+// Connection Endpoint Kind
+// ============================================================================
+
+/// Type of connection endpoint
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnEndKind {
+    /// Free point in space (not attached to anything)
+    FreePoint(Point),
+    /// Attached to a shape via a pin class
+    ShapePin {
+        /// The shape obstacle ID
+        shape_id: u32,
+        /// The pin class ID to connect to
+        pin_class_id: u32,
+    },
+    /// Attached to a junction
+    Junction {
+        /// The junction obstacle ID
+        junction_id: u32,
+    },
+}
+
+impl Default for ConnEndKind {
+    fn default() -> Self {
+        ConnEndKind::FreePoint(Point::new(0.0, 0.0))
+    }
+}
+
+// ============================================================================
+// Connection Endpoint
+// ============================================================================
+
 /// Represents one end of a connector
 #[derive(Debug, Clone)]
 pub struct ConnEnd {
-    /// The position of the endpoint
+    /// The type of endpoint
+    pub kind: ConnEndKind,
+    /// Allowed connection directions (bitfield of ConnDirFlags)
+    pub directions: ConnDirFlags,
+    /// Cached position (resolved from kind)
     pub position: Point,
-    /// Optional connection to a shape
+    /// Optional connection to a shape (for backwards compatibility)
     pub shape_id: Option<u32>,
     /// Optional connection pin ID
     pub pin_id: Option<u32>,
@@ -36,15 +117,58 @@ impl ConnEnd {
     /// Creates a new connector end at the given position
     pub fn new(position: Point) -> Self {
         ConnEnd {
+            kind: ConnEndKind::FreePoint(position),
+            directions: CONN_DIR_ALL,
             position,
             shape_id: None,
             pin_id: None,
         }
     }
 
-    /// Creates a connector end attached to a shape
+    /// Creates a free point endpoint with specific directions
+    pub fn free_point(position: Point, directions: ConnDirFlags) -> Self {
+        ConnEnd {
+            kind: ConnEndKind::FreePoint(position),
+            directions,
+            position,
+            shape_id: None,
+            pin_id: None,
+        }
+    }
+
+    /// Creates a connector end attached to a shape pin class
+    pub fn shape_pin(shape_id: u32, pin_class_id: u32, position: Point) -> Self {
+        ConnEnd {
+            kind: ConnEndKind::ShapePin {
+                shape_id,
+                pin_class_id,
+            },
+            directions: CONN_DIR_ALL,
+            position,
+            shape_id: Some(shape_id),
+            pin_id: Some(pin_class_id),
+        }
+    }
+
+    /// Creates a connector end attached to a junction
+    pub fn junction(junction_id: u32, position: Point) -> Self {
+        ConnEnd {
+            kind: ConnEndKind::Junction { junction_id },
+            directions: CONN_DIR_ALL,
+            position,
+            shape_id: None,
+            pin_id: None,
+        }
+    }
+
+    /// Creates a connector end attached to a shape (backwards compatible)
     pub fn with_shape(position: Point, shape_id: u32) -> Self {
         ConnEnd {
+            kind: ConnEndKind::ShapePin {
+                shape_id,
+                pin_class_id: 0,
+            },
+            directions: CONN_DIR_ALL,
             position,
             shape_id: Some(shape_id),
             pin_id: None,
@@ -54,15 +178,134 @@ impl ConnEnd {
     /// Creates a connector end attached to a specific pin on a shape
     pub fn with_pin(position: Point, shape_id: u32, pin_id: u32) -> Self {
         ConnEnd {
+            kind: ConnEndKind::ShapePin {
+                shape_id,
+                pin_class_id: pin_id,
+            },
+            directions: CONN_DIR_ALL,
             position,
             shape_id: Some(shape_id),
             pin_id: Some(pin_id),
         }
     }
+
+    /// Sets the allowed connection directions
+    pub fn set_directions(&mut self, directions: ConnDirFlags) {
+        self.directions = directions;
+    }
+
+    /// Returns the allowed connection directions
+    pub fn directions(&self) -> ConnDirFlags {
+        self.directions
+    }
+
+    /// Updates the cached position
+    pub fn set_position(&mut self, position: Point) {
+        self.position = position;
+        if let ConnEndKind::FreePoint(ref mut p) = self.kind {
+            *p = position;
+        }
+    }
+
+    /// Returns whether this endpoint is attached to a shape
+    pub fn is_shape_attached(&self) -> bool {
+        matches!(self.kind, ConnEndKind::ShapePin { .. })
+    }
+
+    /// Returns whether this endpoint is attached to a junction
+    pub fn is_junction_attached(&self) -> bool {
+        matches!(self.kind, ConnEndKind::Junction { .. })
+    }
+
+    /// Returns whether this endpoint is a free point
+    pub fn is_free_point(&self) -> bool {
+        matches!(self.kind, ConnEndKind::FreePoint(_))
+    }
+
+    /// Returns the shape ID if attached to a shape
+    pub fn attached_shape_id(&self) -> Option<u32> {
+        match &self.kind {
+            ConnEndKind::ShapePin { shape_id, .. } => Some(*shape_id),
+            _ => None,
+        }
+    }
+
+    /// Returns the junction ID if attached to a junction
+    pub fn attached_junction_id(&self) -> Option<u32> {
+        match &self.kind {
+            ConnEndKind::Junction { junction_id } => Some(*junction_id),
+            _ => None,
+        }
+    }
 }
+
+// ============================================================================
+// Checkpoint (Waypoint)
+// ============================================================================
+
+/// A routing checkpoint (waypoint) that a connector must pass through
+#[derive(Debug, Clone)]
+pub struct Checkpoint {
+    /// Position of the checkpoint
+    pub point: Point,
+    /// Required arrival directions (connector must arrive from these directions)
+    pub arrival_directions: ConnDirFlags,
+    /// Required departure directions (connector must leave in these directions)
+    pub departure_directions: ConnDirFlags,
+}
+
+impl Checkpoint {
+    /// Creates a new checkpoint at the given position with all directions allowed
+    pub fn new(point: Point) -> Self {
+        Checkpoint {
+            point,
+            arrival_directions: CONN_DIR_ALL,
+            departure_directions: CONN_DIR_ALL,
+        }
+    }
+
+    /// Creates a checkpoint with specific arrival and departure directions
+    pub fn with_directions(
+        point: Point,
+        arrival_directions: ConnDirFlags,
+        departure_directions: ConnDirFlags,
+    ) -> Self {
+        Checkpoint {
+            point,
+            arrival_directions,
+            departure_directions,
+        }
+    }
+
+    /// Creates a checkpoint that must be traversed horizontally (left-right)
+    pub fn horizontal(point: Point) -> Self {
+        Checkpoint {
+            point,
+            arrival_directions: CONN_DIR_LEFT | CONN_DIR_RIGHT,
+            departure_directions: CONN_DIR_LEFT | CONN_DIR_RIGHT,
+        }
+    }
+
+    /// Creates a checkpoint that must be traversed vertically (up-down)
+    pub fn vertical(point: Point) -> Self {
+        Checkpoint {
+            point,
+            arrival_directions: CONN_DIR_UP | CONN_DIR_DOWN,
+            departure_directions: CONN_DIR_UP | CONN_DIR_DOWN,
+        }
+    }
+}
+
+// ============================================================================
+// Connector Callback
+// ============================================================================
 
 /// Callback function type for connector updates
 pub type ConnectorCallback = Arc<dyn Fn(&ConnRef) + Send + Sync>;
+
+// ============================================================================
+// Connector Reference
+// ============================================================================
 
 /// A connector reference representing a routed connection between two endpoints
 #[derive(Clone)]
@@ -80,7 +323,9 @@ pub struct ConnRef {
     /// The display route (simplified/post-processed)
     display_route: Option<Polygon>,
     /// Routing checkpoints (waypoints the connector must visit)
-    checkpoints: Vec<Point>,
+    checkpoints: Vec<Checkpoint>,
+    /// Legacy checkpoints (simple points for backwards compatibility)
+    legacy_checkpoints: Vec<Point>,
     /// Whether the connector needs to be repainted
     needs_repaint: bool,
     /// Whether the route is fixed (not automatically routed)
@@ -91,6 +336,8 @@ pub struct ConnRef {
     callback: Option<ConnectorCallback>,
     /// Whether this connector hates crossing other connectors
     hate_crossings: bool,
+    /// Whether the route needs attention (fallback was used)
+    needs_attention: bool,
 }
 
 impl ConnRef {
@@ -104,11 +351,13 @@ impl ConnRef {
             route: None,
             display_route: None,
             checkpoints: Vec::new(),
+            legacy_checkpoints: Vec::new(),
             needs_repaint: false,
             has_fixed_route: false,
             active: true,
             callback: None,
             hate_crossings: false,
+            needs_attention: false,
         }
     }
 
@@ -122,11 +371,33 @@ impl ConnRef {
             route: None,
             display_route: None,
             checkpoints: Vec::new(),
+            legacy_checkpoints: Vec::new(),
             needs_repaint: false,
             has_fixed_route: false,
             active: true,
             callback: None,
             hate_crossings: false,
+            needs_attention: false,
+        }
+    }
+
+    /// Creates a connector with specific routing type
+    pub fn with_type(id: u32, src: ConnEnd, dst: ConnEnd, routing_type: ConnType) -> Self {
+        ConnRef {
+            id,
+            src,
+            dst,
+            routing_type,
+            route: None,
+            display_route: None,
+            checkpoints: Vec::new(),
+            legacy_checkpoints: Vec::new(),
+            needs_repaint: false,
+            has_fixed_route: false,
+            active: true,
+            callback: None,
+            hate_crossings: false,
+            needs_attention: false,
         }
     }
 
@@ -169,6 +440,11 @@ impl ConnRef {
         (&self.src, &self.dst)
     }
 
+    /// Returns mutable references to the endpoints
+    pub fn endpoint_conn_ends_mut(&mut self) -> (&mut ConnEnd, &mut ConnEnd) {
+        (&mut self.src, &mut self.dst)
+    }
+
     /// Sets the routing type (polyline or orthogonal)
     pub fn set_routing_type(&mut self, routing_type: ConnType) {
         if self.routing_type != routing_type {
@@ -182,15 +458,32 @@ impl ConnRef {
         self.routing_type
     }
 
-    /// Sets routing checkpoints (waypoints the connector must visit)
-    pub fn set_routing_checkpoints(&mut self, checkpoints: Vec<Point>) {
+    /// Sets routing checkpoints with direction constraints
+    pub fn set_checkpoints(&mut self, checkpoints: Vec<Checkpoint>) {
         self.checkpoints = checkpoints;
         self.needs_repaint = true;
     }
 
     /// Returns the routing checkpoints
-    pub fn routing_checkpoints(&self) -> &[Point] {
+    pub fn checkpoints(&self) -> &[Checkpoint] {
         &self.checkpoints
+    }
+
+    /// Sets routing checkpoints (simple points, backwards compatible)
+    pub fn set_routing_checkpoints(&mut self, checkpoints: Vec<Point>) {
+        self.legacy_checkpoints = checkpoints;
+        // Also update the new checkpoints format
+        self.checkpoints = self
+            .legacy_checkpoints
+            .iter()
+            .map(|p| Checkpoint::new(*p))
+            .collect();
+        self.needs_repaint = true;
+    }
+
+    /// Returns the routing checkpoints as simple points (backwards compatible)
+    pub fn routing_checkpoints(&self) -> &[Point] {
+        &self.legacy_checkpoints
     }
 
     /// Returns the raw route (for debugging)
@@ -232,15 +525,42 @@ impl ConnRef {
         self.needs_repaint
     }
 
+    /// Returns whether the route needs attention (fallback was used)
+    pub fn needs_attention(&self) -> bool {
+        self.needs_attention
+    }
+
+    /// Sets whether the route needs attention
+    pub fn set_needs_attention(&mut self, value: bool) {
+        self.needs_attention = value;
+    }
+
     /// Sets the callback function for route updates
     pub fn set_callback(&mut self, callback: ConnectorCallback) {
         self.callback = Some(callback);
+    }
+
+    /// Clears the callback function
+    pub fn clear_callback(&mut self) {
+        self.callback = None;
     }
 
     /// Internal method to set the route
     pub(crate) fn set_route(&mut self, route: Polygon) {
         self.route = Some(route.clone());
         self.display_route = Some(route);
+        self.needs_repaint = true;
+
+        // Call callback if set
+        if let Some(ref callback) = self.callback {
+            callback(self);
+        }
+    }
+
+    /// Internal method to set both route and display route
+    pub(crate) fn set_routes(&mut self, route: Polygon, display_route: Polygon) {
+        self.route = Some(route);
+        self.display_route = Some(display_route);
         self.needs_repaint = true;
 
         // Call callback if set
@@ -278,6 +598,16 @@ impl ConnRef {
         }
         None
     }
+
+    /// Returns the source endpoint's shape ID if attached
+    pub fn source_shape_id(&self) -> Option<u32> {
+        self.src.attached_shape_id()
+    }
+
+    /// Returns the destination endpoint's shape ID if attached
+    pub fn dest_shape_id(&self) -> Option<u32> {
+        self.dst.attached_shape_id()
+    }
 }
 
 impl std::fmt::Debug for ConnRef {
@@ -288,10 +618,15 @@ impl std::fmt::Debug for ConnRef {
             .field("needs_repaint", &self.needs_repaint)
             .field("has_fixed_route", &self.has_fixed_route)
             .field("active", &self.active)
-            .field("checkpoints", &self.checkpoints)
+            .field("checkpoints", &self.checkpoints.len())
+            .field("hate_crossings", &self.hate_crossings)
             .finish()
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -340,5 +675,51 @@ mod tests {
         conn.set_fixed_route(route);
         assert!(conn.has_fixed_route());
         assert!(conn.route().is_some());
+    }
+
+    #[test]
+    fn test_conn_end_types() {
+        // Free point
+        let free = ConnEnd::new(Point::new(5.0, 5.0));
+        assert!(free.is_free_point());
+        assert!(!free.is_shape_attached());
+
+        // Shape attached
+        let shape = ConnEnd::shape_pin(1, 0, Point::new(10.0, 10.0));
+        assert!(shape.is_shape_attached());
+        assert_eq!(shape.attached_shape_id(), Some(1));
+
+        // Junction attached
+        let junction = ConnEnd::junction(2, Point::new(15.0, 15.0));
+        assert!(junction.is_junction_attached());
+        assert_eq!(junction.attached_junction_id(), Some(2));
+    }
+
+    #[test]
+    fn test_conn_directions() {
+        let mut end = ConnEnd::new(Point::new(0.0, 0.0));
+        assert_eq!(end.directions(), CONN_DIR_ALL);
+
+        end.set_directions(CONN_DIR_UP | CONN_DIR_DOWN);
+        assert!(has_dir_up(end.directions()));
+        assert!(has_dir_down(end.directions()));
+        assert!(!has_dir_left(end.directions()));
+        assert!(!has_dir_right(end.directions()));
+    }
+
+    #[test]
+    fn test_checkpoint() {
+        let cp = Checkpoint::new(Point::new(50.0, 50.0));
+        assert_eq!(cp.arrival_directions, CONN_DIR_ALL);
+
+        let h_cp = Checkpoint::horizontal(Point::new(50.0, 50.0));
+        assert!(has_dir_left(h_cp.arrival_directions));
+        assert!(has_dir_right(h_cp.arrival_directions));
+        assert!(!has_dir_up(h_cp.arrival_directions));
+
+        let v_cp = Checkpoint::vertical(Point::new(50.0, 50.0));
+        assert!(has_dir_up(v_cp.arrival_directions));
+        assert!(has_dir_down(v_cp.arrival_directions));
+        assert!(!has_dir_left(v_cp.arrival_directions));
     }
 }

@@ -147,6 +147,177 @@ impl Default for HyperedgeRerouter {
     }
 }
 
+impl HyperedgeRerouter {
+    /// Improves hyperedge routing by optimizing junction positions.
+    /// Uses iterative local search to find better junction placements.
+    pub fn improve_hyperedge(&self, hyperedge: &mut HyperedgeRef, iteration_limit: usize) -> f64 {
+        let terminals: Vec<Point> = hyperedge
+            .terminals()
+            .iter()
+            .map(|t| t.position)
+            .collect();
+
+        if terminals.len() < 2 {
+            return 0.0;
+        }
+
+        // Start with Steiner tree junction
+        let mut junctions = self.compute_steiner_tree(&terminals);
+        let mut best_cost = self.compute_hyperedge_cost(&terminals, &junctions);
+
+        // Iterative improvement
+        for _ in 0..iteration_limit {
+            let mut improved = false;
+
+            for j_idx in 0..junctions.len() {
+                // Try small perturbations
+                let deltas = [
+                    Point::new(1.0, 0.0),
+                    Point::new(-1.0, 0.0),
+                    Point::new(0.0, 1.0),
+                    Point::new(0.0, -1.0),
+                    Point::new(1.0, 1.0),
+                    Point::new(-1.0, -1.0),
+                    Point::new(1.0, -1.0),
+                    Point::new(-1.0, 1.0),
+                ];
+
+                for delta in &deltas {
+                    let old_pos = junctions[j_idx];
+                    junctions[j_idx] = Point::new(old_pos.x + delta.x, old_pos.y + delta.y);
+
+                    let new_cost = self.compute_hyperedge_cost(&terminals, &junctions);
+                    if new_cost < best_cost {
+                        best_cost = new_cost;
+                        improved = true;
+                    } else {
+                        junctions[j_idx] = old_pos;
+                    }
+                }
+            }
+
+            if !improved {
+                break;
+            }
+        }
+
+        best_cost
+    }
+
+    /// Computes the total cost of a hyperedge (sum of all edge lengths)
+    fn compute_hyperedge_cost(&self, terminals: &[Point], junctions: &[Point]) -> f64 {
+        if junctions.is_empty() {
+            // Direct connections between terminals (star from centroid)
+            let mut cx = 0.0;
+            let mut cy = 0.0;
+            for t in terminals {
+                cx += t.x;
+                cy += t.y;
+            }
+            cx /= terminals.len() as f64;
+            cy /= terminals.len() as f64;
+            let center = Point::new(cx, cy);
+
+            return terminals.iter().map(|t| t.distance(&center)).sum();
+        }
+
+        // Cost = sum of distances from each terminal to nearest junction
+        // + sum of distances between junctions (if multiple)
+        let mut cost = 0.0;
+
+        // Terminal to junction distances
+        for terminal in terminals {
+            let min_dist = junctions
+                .iter()
+                .map(|j| terminal.distance(j))
+                .fold(f64::INFINITY, f64::min);
+            cost += min_dist;
+        }
+
+        // Junction to junction distances (for multiple junctions)
+        for i in 0..junctions.len() {
+            for j in (i + 1)..junctions.len() {
+                cost += junctions[i].distance(&junctions[j]);
+            }
+        }
+
+        cost
+    }
+}
+
+// ============================================================================
+// Hyperedge Tree Building
+// ============================================================================
+
+/// Represents an edge in the hyperedge tree
+#[derive(Debug, Clone)]
+pub struct HyperedgeTreeEdge {
+    pub from: Point,
+    pub to: Point,
+    pub is_terminal: bool,
+}
+
+/// Builds a minimum spanning tree connecting all terminals through junctions
+pub fn build_hyperedge_tree(terminals: &[ConnEnd], junctions: &[Point]) -> Vec<HyperedgeTreeEdge> {
+    let mut edges = Vec::new();
+
+    if terminals.is_empty() {
+        return edges;
+    }
+
+    let terminal_points: Vec<Point> = terminals.iter().map(|t| t.position).collect();
+
+    if junctions.is_empty() {
+        // No junctions - connect all to centroid
+        let mut cx = 0.0;
+        let mut cy = 0.0;
+        for t in &terminal_points {
+            cx += t.x;
+            cy += t.y;
+        }
+        cx /= terminal_points.len() as f64;
+        cy /= terminal_points.len() as f64;
+        let center = Point::new(cx, cy);
+
+        for t in &terminal_points {
+            edges.push(HyperedgeTreeEdge {
+                from: *t,
+                to: center,
+                is_terminal: true,
+            });
+        }
+    } else {
+        // Connect each terminal to nearest junction
+        for t in &terminal_points {
+            let nearest = junctions
+                .iter()
+                .min_by(|a, b| {
+                    t.distance(a)
+                        .partial_cmp(&t.distance(b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap();
+
+            edges.push(HyperedgeTreeEdge {
+                from: *t,
+                to: *nearest,
+                is_terminal: true,
+            });
+        }
+
+        // Connect junctions together (simple chain for now)
+        for i in 0..junctions.len().saturating_sub(1) {
+            edges.push(HyperedgeTreeEdge {
+                from: junctions[i],
+                to: junctions[i + 1],
+                is_terminal: false,
+            });
+        }
+    }
+
+    edges
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

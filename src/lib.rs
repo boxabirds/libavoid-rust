@@ -40,6 +40,7 @@
 //!
 //! Original repository: <https://github.com/mjwybrow/adaptagrams>
 
+pub mod action;
 pub mod geometry;
 pub mod router;
 pub mod connector;
@@ -62,6 +63,8 @@ pub use obstacle::Obstacle;
 pub use shape::ShapeRef;
 pub use junction::JunctionRef;
 pub use hyperedge::{HyperedgeRef, HyperedgeRerouter};
+pub use action::{ActionInfo, ActionType};
+pub use connector::{ConnDirFlags, Checkpoint, CONN_DIR_ALL, CONN_DIR_NONE, CONN_DIR_UP, CONN_DIR_DOWN, CONN_DIR_LEFT, CONN_DIR_RIGHT};
 
 /// Dimension constants
 pub const XDIM: usize = 0;

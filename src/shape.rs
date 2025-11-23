@@ -183,6 +183,126 @@ impl ShapeRef {
     pub(crate) fn data_mut(&mut self) -> &mut ObstacleData {
         &mut self.data
     }
+
+    // ========================================================================
+    // Pin Selection Algorithm
+    // ========================================================================
+
+    /// Finds pins by class ID
+    pub fn find_pins_by_class(&self, class_id: u32) -> Vec<&ConnectionPin> {
+        self.connection_pins
+            .iter()
+            .filter(|p| p.class_id == class_id)
+            .collect()
+    }
+
+    /// Selects the best pin for a connection based on the target point.
+    /// Returns the pin ID and its absolute position.
+    ///
+    /// Selection criteria:
+    /// 1. Filter pins by class ID
+    /// 2. Filter pins that allow the required direction
+    /// 3. Select the pin closest to the target point
+    /// 4. Consider connection cost as a tiebreaker
+    pub fn select_pin_for_connection(
+        &self,
+        class_id: u32,
+        target_point: &Point,
+        required_direction: u32,
+    ) -> Option<(u32, Point)> {
+        let candidates: Vec<&ConnectionPin> = self
+            .connection_pins
+            .iter()
+            .filter(|p| p.class_id == class_id)
+            .filter(|p| required_direction == 0 || (p.directions & required_direction) != 0)
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let shape_center = self.position();
+
+        // Score each pin: lower is better
+        // Score = distance_to_target + connection_cost
+        let mut best_pin: Option<(&ConnectionPin, f64)> = None;
+
+        for pin in candidates {
+            // Compute absolute pin position
+            let abs_position = Point::new(
+                shape_center.x + pin.position.x - shape_center.x + pin.inside_offset,
+                shape_center.y + pin.position.y - shape_center.y,
+            );
+
+            let distance = abs_position.distance(target_point);
+            let score = distance + pin.connection_cost;
+
+            if let Some((_, best_score)) = best_pin {
+                if score < best_score {
+                    best_pin = Some((pin, score));
+                }
+            } else {
+                best_pin = Some((pin, score));
+            }
+        }
+
+        best_pin.map(|(pin, _)| {
+            let abs_position = Point::new(
+                shape_center.x + pin.position.x - shape_center.x,
+                shape_center.y + pin.position.y - shape_center.y,
+            );
+            (pin.id, abs_position)
+        })
+    }
+
+    /// Gets the absolute position of a pin (relative to world coordinates)
+    pub fn get_pin_position(&self, pin_id: u32) -> Option<Point> {
+        let shape_center = self.position();
+        self.find_pin(pin_id).map(|pin| {
+            Point::new(
+                shape_center.x + (pin.position.x - shape_center.x),
+                shape_center.y + (pin.position.y - shape_center.y),
+            )
+        })
+    }
+
+    /// Checks if a pin is available (not already used by exclusive connection)
+    pub fn is_pin_available(&self, pin_id: u32, _used_pins: &HashSet<u32>) -> bool {
+        if let Some(pin) = self.find_pin(pin_id) {
+            // Non-exclusive pins are always available
+            if !pin.exclusive {
+                return true;
+            }
+            // For exclusive pins, check if already used
+            !_used_pins.contains(&pin_id)
+        } else {
+            false
+        }
+    }
+
+    /// Gets all available pins for a given class, filtered by direction
+    pub fn get_available_pins(
+        &self,
+        class_id: u32,
+        direction_filter: u32,
+        used_pins: &HashSet<u32>,
+    ) -> Vec<(u32, Point)> {
+        let shape_center = self.position();
+
+        self.connection_pins
+            .iter()
+            .filter(|p| p.class_id == class_id)
+            .filter(|p| direction_filter == 0 || (p.directions & direction_filter) != 0)
+            .filter(|p| !p.exclusive || !used_pins.contains(&p.id))
+            .map(|p| {
+                let abs_pos = Point::new(
+                    shape_center.x + (p.position.x - shape_center.x),
+                    shape_center.y + (p.position.y - shape_center.y),
+                );
+                (p.id, abs_pos)
+            })
+            .collect()
+    }
 }
 
 impl Obstacle for ShapeRef {
