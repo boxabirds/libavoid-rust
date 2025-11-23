@@ -484,6 +484,215 @@ impl Edge {
     }
 }
 
+// ============================================================================
+// Geometry utility functions
+// ============================================================================
+
+/// Tolerance for floating point comparisons
+pub const EPSILON: f64 = 1e-10;
+
+/// Computes the counter-clockwise orientation of three points.
+/// Returns positive if CCW (left turn), negative if CW (right turn), zero if collinear.
+pub fn ccw(a: &Point, b: &Point, c: &Point) -> f64 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+/// Checks if points are collinear (within epsilon tolerance)
+pub fn collinear(a: &Point, b: &Point, c: &Point) -> bool {
+    ccw(a, b, c).abs() < EPSILON
+}
+
+/// Checks if point q lies on segment pr (assumes collinearity)
+pub fn on_segment(p: &Point, q: &Point, r: &Point) -> bool {
+    q.x >= p.x.min(r.x) - EPSILON
+        && q.x <= p.x.max(r.x) + EPSILON
+        && q.y >= p.y.min(r.y) - EPSILON
+        && q.y <= p.y.max(r.y) + EPSILON
+}
+
+/// Checks if two line segments intersect.
+/// Uses the CCW orientation test for robustness.
+/// Returns true only if segments properly cross or overlap.
+pub fn segments_intersect(a1: &Point, a2: &Point, b1: &Point, b2: &Point) -> bool {
+    let ccw1 = ccw(a1, a2, b1);
+    let ccw2 = ccw(a1, a2, b2);
+    let ccw3 = ccw(b1, b2, a1);
+    let ccw4 = ccw(b1, b2, a2);
+
+    // Standard crossing case: segments straddle each other
+    if ccw1 * ccw2 < 0.0 && ccw3 * ccw4 < 0.0 {
+        return true;
+    }
+
+    // Collinear cases - check if one endpoint lies on the other segment
+    if ccw1.abs() < EPSILON && on_segment(a1, b1, a2) {
+        return true;
+    }
+    if ccw2.abs() < EPSILON && on_segment(a1, b2, a2) {
+        return true;
+    }
+    if ccw3.abs() < EPSILON && on_segment(b1, a1, b2) {
+        return true;
+    }
+    if ccw4.abs() < EPSILON && on_segment(b1, a2, b2) {
+        return true;
+    }
+
+    false
+}
+
+/// Checks if two line segments intersect, excluding shared endpoints.
+/// This is used for visibility tests where touching endpoints is allowed.
+pub fn segments_intersect_excluding_endpoints(
+    a1: &Point,
+    a2: &Point,
+    b1: &Point,
+    b2: &Point,
+) -> bool {
+    // Check if any endpoints are the same (shared endpoint case)
+    if a1.equals(b1) || a1.equals(b2) || a2.equals(b1) || a2.equals(b2) {
+        // For shared endpoint, check if segments overlap beyond the shared point
+        if a1.equals(b1) {
+            // Segments share a1/b1, check if they overlap
+            if collinear(a1, a2, b2) && (on_segment(a1, b2, a2) || on_segment(b1, a2, b2)) {
+                // b2 is on segment a1-a2, or a2 is on segment b1-b2
+                // This means overlap beyond the shared point
+                return !a2.equals(b2); // Only intersect if they're different segments
+            }
+            return false;
+        }
+        if a1.equals(b2) {
+            if collinear(a1, a2, b1) && (on_segment(a1, b1, a2) || on_segment(b2, a2, b1)) {
+                return !a2.equals(b1);
+            }
+            return false;
+        }
+        if a2.equals(b1) {
+            if collinear(a2, a1, b2) && (on_segment(a2, b2, a1) || on_segment(b1, a1, b2)) {
+                return !a1.equals(b2);
+            }
+            return false;
+        }
+        if a2.equals(b2) {
+            if collinear(a2, a1, b1) && (on_segment(a2, b1, a1) || on_segment(b2, a1, b1)) {
+                return !a1.equals(b1);
+            }
+            return false;
+        }
+    }
+
+    // No shared endpoints - use standard intersection test
+    segments_intersect(a1, a2, b1, b2)
+}
+
+/// Checks if a point is inside a polygon using ray casting algorithm.
+/// Returns true if the point is strictly inside (not on boundary).
+pub fn point_in_polygon(point: &Point, polygon: &Polygon) -> bool {
+    let n = polygon.size();
+    if n < 3 {
+        return false;
+    }
+
+    let mut inside = false;
+    let mut j = n - 1;
+
+    for i in 0..n {
+        let pi = polygon.at(i);
+        let pj = polygon.at(j);
+
+        // Check if point is on an edge
+        if collinear(pi, point, pj) && on_segment(pi, point, pj) {
+            return false; // On boundary, not inside
+        }
+
+        if ((pi.y > point.y) != (pj.y > point.y))
+            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+
+        j = i;
+    }
+
+    inside
+}
+
+/// Checks if a line segment intersects a polygon.
+/// Returns true if the segment crosses any edge of the polygon OR
+/// if either endpoint is inside the polygon.
+pub fn segment_intersects_polygon(p1: &Point, p2: &Point, polygon: &Polygon) -> bool {
+    let n = polygon.size();
+    if n < 3 {
+        return false;
+    }
+
+    // Check if segment intersects any polygon edge
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let poly_p1 = polygon.at(i);
+        let poly_p2 = polygon.at(j);
+
+        if segments_intersect_excluding_endpoints(p1, p2, poly_p1, poly_p2) {
+            return true;
+        }
+    }
+
+    // Check if the midpoint of the segment is inside the polygon
+    // (handles case where segment is entirely inside)
+    let mid = Point::new((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0);
+    if point_in_polygon(&mid, polygon) {
+        return true;
+    }
+
+    // Also check both endpoints
+    if point_in_polygon(p1, polygon) || point_in_polygon(p2, polygon) {
+        return true;
+    }
+
+    false
+}
+
+/// Checks if a line segment passes through a polygon, excluding cases where
+/// the segment merely touches a vertex of the polygon (for visibility tests).
+pub fn segment_intersects_polygon_interior(p1: &Point, p2: &Point, polygon: &Polygon) -> bool {
+    let n = polygon.size();
+    if n < 3 {
+        return false;
+    }
+
+    // Check if either endpoint is strictly inside the polygon
+    if point_in_polygon(p1, polygon) || point_in_polygon(p2, polygon) {
+        return true;
+    }
+
+    // Check if segment properly crosses any polygon edge
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let poly_p1 = polygon.at(i);
+        let poly_p2 = polygon.at(j);
+
+        // Skip if segment endpoint is a polygon vertex
+        if p1.equals(poly_p1) || p1.equals(poly_p2) || p2.equals(poly_p1) || p2.equals(poly_p2) {
+            continue;
+        }
+
+        // Check for proper crossing (not just touching)
+        let ccw1 = ccw(p1, p2, poly_p1);
+        let ccw2 = ccw(p1, p2, poly_p2);
+        let ccw3 = ccw(poly_p1, poly_p2, p1);
+        let ccw4 = ccw(poly_p1, poly_p2, p2);
+
+        // Proper crossing: opposite signs on both tests
+        if ccw1 * ccw2 < 0.0 && ccw3 * ccw4 < 0.0 {
+            return true;
+        }
+    }
+
+    // Check midpoint is inside (segment entirely within polygon)
+    let mid = Point::new((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0);
+    point_in_polygon(&mid, polygon)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +762,185 @@ mod tests {
         let bbox = poly.bounding_rect();
         assert_eq!(bbox.width(), 10.0);
         assert_eq!(bbox.height(), 10.0);
+    }
+
+    // ========================================================================
+    // Geometry function tests
+    // ========================================================================
+
+    #[test]
+    fn test_ccw() {
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(1.0, 0.0);
+        let c = Point::new(1.0, 1.0);
+
+        // CCW turn (left turn)
+        assert!(ccw(&a, &b, &c) > 0.0);
+
+        // CW turn (right turn)
+        let d = Point::new(1.0, -1.0);
+        assert!(ccw(&a, &b, &d) < 0.0);
+
+        // Collinear
+        let e = Point::new(2.0, 0.0);
+        assert!(ccw(&a, &b, &e).abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_segments_intersect_crossing() {
+        // X crossing
+        let a1 = Point::new(0.0, 0.0);
+        let a2 = Point::new(10.0, 10.0);
+        let b1 = Point::new(0.0, 10.0);
+        let b2 = Point::new(10.0, 0.0);
+
+        assert!(segments_intersect(&a1, &a2, &b1, &b2));
+    }
+
+    #[test]
+    fn test_segments_intersect_no_crossing() {
+        // Parallel, no crossing
+        let a1 = Point::new(0.0, 0.0);
+        let a2 = Point::new(10.0, 0.0);
+        let b1 = Point::new(0.0, 5.0);
+        let b2 = Point::new(10.0, 5.0);
+
+        assert!(!segments_intersect(&a1, &a2, &b1, &b2));
+    }
+
+    #[test]
+    fn test_segments_intersect_shared_endpoint() {
+        // Segments share an endpoint
+        let a1 = Point::new(0.0, 0.0);
+        let a2 = Point::new(5.0, 5.0);
+        let b1 = Point::new(5.0, 5.0);
+        let b2 = Point::new(10.0, 0.0);
+
+        // Standard test considers this an intersection
+        assert!(segments_intersect(&a1, &a2, &b1, &b2));
+        // But excluding endpoints test does not
+        assert!(!segments_intersect_excluding_endpoints(&a1, &a2, &b1, &b2));
+    }
+
+    #[test]
+    fn test_segments_intersect_t_junction() {
+        // T-junction
+        let a1 = Point::new(0.0, 5.0);
+        let a2 = Point::new(10.0, 5.0);
+        let b1 = Point::new(5.0, 0.0);
+        let b2 = Point::new(5.0, 5.0);
+
+        assert!(segments_intersect(&a1, &a2, &b1, &b2));
+    }
+
+    #[test]
+    fn test_point_in_polygon_inside() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Point clearly inside
+        let inside = Point::new(5.0, 5.0);
+        assert!(point_in_polygon(&inside, &poly));
+    }
+
+    #[test]
+    fn test_point_in_polygon_outside() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Point clearly outside
+        let outside = Point::new(15.0, 5.0);
+        assert!(!point_in_polygon(&outside, &poly));
+    }
+
+    #[test]
+    fn test_point_in_polygon_on_boundary() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Point on edge should return false (not strictly inside)
+        let on_edge = Point::new(5.0, 0.0);
+        assert!(!point_in_polygon(&on_edge, &poly));
+    }
+
+    #[test]
+    fn test_segment_intersects_polygon_crossing() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Segment passes through polygon
+        let p1 = Point::new(-5.0, 5.0);
+        let p2 = Point::new(15.0, 5.0);
+        assert!(segment_intersects_polygon(&p1, &p2, &poly));
+    }
+
+    #[test]
+    fn test_segment_intersects_polygon_inside() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Segment entirely inside polygon
+        let p1 = Point::new(2.0, 2.0);
+        let p2 = Point::new(8.0, 8.0);
+        assert!(segment_intersects_polygon(&p1, &p2, &poly));
+    }
+
+    #[test]
+    fn test_segment_intersects_polygon_outside() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Segment entirely outside polygon
+        let p1 = Point::new(15.0, 0.0);
+        let p2 = Point::new(15.0, 10.0);
+        assert!(!segment_intersects_polygon(&p1, &p2, &poly));
+    }
+
+    #[test]
+    fn test_segment_along_edge_no_intersect() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Segment that goes along outside of polygon shouldn't intersect
+        let p1 = Point::new(-5.0, 0.0);
+        let p2 = Point::new(-5.0, 10.0);
+        assert!(!segment_intersects_polygon(&p1, &p2, &poly));
+    }
+
+    #[test]
+    fn test_segment_corner_touch() {
+        let mut poly = Polygon::new();
+        poly.push(Point::new(0.0, 0.0));
+        poly.push(Point::new(10.0, 0.0));
+        poly.push(Point::new(10.0, 10.0));
+        poly.push(Point::new(0.0, 10.0));
+
+        // Segment touches corner of polygon
+        let p1 = Point::new(-5.0, -5.0);
+        let p2 = Point::new(0.0, 0.0);
+
+        // Interior test should not count corner touch as intersection
+        assert!(!segment_intersects_polygon_interior(&p1, &p2, &poly));
     }
 }

@@ -393,17 +393,31 @@ impl Router {
         self.orthogonal_router.route_orthogonal(src, dst, &obstacles)
     }
 
-    /// Checks if a direct path is clear
+    /// Checks if a direct path is clear of all obstacles.
+    /// Uses proper polygon intersection test, not just bounding box.
     fn is_direct_path_clear(&self, from: &Point, to: &Point, obstacles: &[&dyn Obstacle]) -> bool {
+        use crate::geometry::{segment_intersects_polygon_interior, point_in_polygon};
+
         for obstacle in obstacles {
             if !obstacle.is_active() {
                 continue;
             }
 
-            let bbox = obstacle.polygon().bounding_rect();
+            let polygon = obstacle.polygon();
 
-            // Simple bounding box intersection check
-            if self.line_intersects_box(from, to, &bbox) {
+            // First quick check: bounding box
+            let bbox = polygon.bounding_rect();
+            if !self.line_might_intersect_box(from, to, &bbox) {
+                continue; // Can't possibly intersect
+            }
+
+            // Full polygon intersection test
+            if segment_intersects_polygon_interior(from, to, polygon) {
+                return false;
+            }
+
+            // Also check if either endpoint is inside the polygon
+            if point_in_polygon(from, polygon) || point_in_polygon(to, polygon) {
                 return false;
             }
         }
@@ -411,40 +425,23 @@ impl Router {
         true
     }
 
-    /// Checks if a line intersects a bounding box
-    fn line_intersects_box(&self, from: &Point, to: &Point, bbox: &crate::geometry::Box) -> bool {
-        // Simple AABB line intersection test
-        let dx = to.x - from.x;
-        let dy = to.y - from.y;
+    /// Quick bounding box check to see if a line MIGHT intersect.
+    /// Returns true if intersection is possible, false if definitely not.
+    fn line_might_intersect_box(&self, from: &Point, to: &Point, bbox: &crate::geometry::Box) -> bool {
+        // Expand bbox slightly for floating point tolerance
+        const TOLERANCE: f64 = 1e-6;
+        let min_x = bbox.min.x - TOLERANCE;
+        let max_x = bbox.max.x + TOLERANCE;
+        let min_y = bbox.min.y - TOLERANCE;
+        let max_y = bbox.max.y + TOLERANCE;
 
-        let t_min_x = if dx.abs() > 1e-10 {
-            ((bbox.min.x - from.x) / dx).min((bbox.max.x - from.x) / dx)
-        } else {
-            f64::NEG_INFINITY
-        };
+        // Check if line segment's bounding box intersects obstacle's bounding box
+        let line_min_x = from.x.min(to.x);
+        let line_max_x = from.x.max(to.x);
+        let line_min_y = from.y.min(to.y);
+        let line_max_y = from.y.max(to.y);
 
-        let t_max_x = if dx.abs() > 1e-10 {
-            ((bbox.min.x - from.x) / dx).max((bbox.max.x - from.x) / dx)
-        } else {
-            f64::INFINITY
-        };
-
-        let t_min_y = if dy.abs() > 1e-10 {
-            ((bbox.min.y - from.y) / dy).min((bbox.max.y - from.y) / dy)
-        } else {
-            f64::NEG_INFINITY
-        };
-
-        let t_max_y = if dy.abs() > 1e-10 {
-            ((bbox.min.y - from.y) / dy).max((bbox.max.y - from.y) / dy)
-        } else {
-            f64::INFINITY
-        };
-
-        let t_min = t_min_x.max(t_min_y);
-        let t_max = t_max_x.min(t_max_y);
-
-        t_max >= t_min && t_min <= 1.0 && t_max >= 0.0
+        !(line_max_x < min_x || line_min_x > max_x || line_max_y < min_y || line_min_y > max_y)
     }
 
     /// Reroutes all connectors
