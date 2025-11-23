@@ -90,10 +90,26 @@ beforeAll(async () => {
       improveHyperedgeRoutesMovingAddingAndDeletingJunctions: 5,
       nudgeSharedPathsWithCommonEndPoint: 6,
 
-      // Utility functions (TODO: implement if needed)
-      destroy: undefined,
-      getPointer: undefined,
-      wrapPointer: undefined,
+      // Utility functions (Emscripten compatibility)
+      // destroy: Free an object's memory - calls free() if available
+      destroy: function(obj) {
+        if (obj && typeof obj.free === 'function') {
+          obj.free();
+        }
+      },
+      // getPointer: Get raw pointer (not available in wasm-bindgen, returns 0)
+      getPointer: function(obj) {
+        // wasm-bindgen doesn't expose raw pointers
+        // Return 0 to indicate no pointer access
+        return 0;
+      },
+      // wrapPointer: Wrap a pointer into a JS object (not available in wasm-bindgen)
+      wrapPointer: function(ptr, Type) {
+        // wasm-bindgen doesn't support wrapping raw pointers
+        // Return null to indicate unsupported operation
+        console.warn('wrapPointer is not supported in wasm-bindgen - use class constructors instead');
+        return null;
+      },
     };
 
     globalThis.AvoidLib = libavoidRust.AvoidLib;

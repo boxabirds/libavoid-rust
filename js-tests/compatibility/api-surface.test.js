@@ -224,20 +224,30 @@ describe('API Surface Compatibility', () => {
     });
   });
 
-  describe('Missing Utility Functions (GAP - need to implement)', () => {
+  describe('Utility Functions (implemented)', () => {
     beforeEach(({ skip }) => {
       if (!globalThis.Avoid) skip();
     });
 
-    it.fails('has destroy() function', () => {
+    it('has destroy() function', () => {
       expect(typeof globalThis.Avoid.destroy).toBe('function');
     });
 
-    it.fails('has getPointer() function', () => {
+    it('destroy() can be called on objects', () => {
+      const point = new globalThis.Avoid.Point(10, 20);
+      expect(() => globalThis.Avoid.destroy(point)).not.toThrow();
+    });
+
+    it('has getPointer() function', () => {
       expect(typeof globalThis.Avoid.getPointer).toBe('function');
     });
 
-    it.fails('has wrapPointer() function', () => {
+    it('getPointer() returns a number', () => {
+      const point = new globalThis.Avoid.Point(10, 20);
+      expect(typeof globalThis.Avoid.getPointer(point)).toBe('number');
+    });
+
+    it('has wrapPointer() function', () => {
       expect(typeof globalThis.Avoid.wrapPointer).toBe('function');
     });
   });
