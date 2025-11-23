@@ -117,13 +117,53 @@ describe('API Surface Compatibility', () => {
     });
   });
 
-  describe('Missing Classes (GAP - need to implement)', () => {
+  describe('ShapeConnectionPin (implemented)', () => {
     beforeEach(({ skip }) => {
       if (!globalThis.Avoid) skip();
     });
 
-    it.fails('has ShapeConnectionPin class', () => {
+    it('has ShapeConnectionPin class', () => {
       expect(globalThis.Avoid.ShapeConnectionPin).toBeDefined();
+      expect(typeof globalThis.Avoid.ShapeConnectionPin).toBe('function');
+    });
+
+    it('ShapeConnectionPin can be created on a shape', () => {
+      const router = new globalThis.Avoid.Router(globalThis.Avoid.PolyLineRouting);
+      const poly = new globalThis.Avoid.Polygon(4);
+      poly.set_ps(0, new globalThis.Avoid.Point(0, 0));
+      poly.set_ps(1, new globalThis.Avoid.Point(100, 0));
+      poly.set_ps(2, new globalThis.Avoid.Point(100, 100));
+      poly.set_ps(3, new globalThis.Avoid.Point(0, 100));
+      const shape = new globalThis.Avoid.ShapeRef(router, poly);
+
+      const pin = new globalThis.Avoid.ShapeConnectionPin(
+        shape, 1, 50, 0, 0, globalThis.Avoid.ConnDirAll
+      );
+      expect(pin).toBeDefined();
+      expect(pin.directions()).toBe(globalThis.Avoid.ConnDirAll);
+    });
+
+    it('ShapeConnectionPin exclusive flag works', () => {
+      const router = new globalThis.Avoid.Router(globalThis.Avoid.PolyLineRouting);
+      const poly = new globalThis.Avoid.Polygon(4);
+      poly.set_ps(0, new globalThis.Avoid.Point(0, 0));
+      poly.set_ps(1, new globalThis.Avoid.Point(100, 0));
+      poly.set_ps(2, new globalThis.Avoid.Point(100, 100));
+      poly.set_ps(3, new globalThis.Avoid.Point(0, 100));
+      const shape = new globalThis.Avoid.ShapeRef(router, poly);
+
+      const pin = new globalThis.Avoid.ShapeConnectionPin(
+        shape, 1, 50, 0, 0, globalThis.Avoid.ConnDirAll
+      );
+      expect(pin.isExclusive()).toBe(false);
+      pin.setExclusive(true);
+      expect(pin.isExclusive()).toBe(true);
+    });
+  });
+
+  describe('Missing Classes (GAP - need to implement)', () => {
+    beforeEach(({ skip }) => {
+      if (!globalThis.Avoid) skip();
     });
 
     it.fails('has HyperedgeRerouter class', () => {

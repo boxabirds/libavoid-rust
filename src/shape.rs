@@ -36,10 +36,18 @@ pub struct ShapeRef {
 pub struct ConnectionPin {
     /// Unique ID for the pin
     pub id: u32,
+    /// Class ID for grouping pins
+    pub class_id: u32,
     /// Position relative to shape
     pub position: Point,
     /// Directions this pin can connect (bitfield)
     pub directions: u32,
+    /// Whether this pin is exclusive (only one connection allowed)
+    pub exclusive: bool,
+    /// Connection cost for this pin
+    pub connection_cost: f64,
+    /// Inside offset from shape boundary
+    pub inside_offset: f64,
 }
 
 impl ConnectionPin {
@@ -47,8 +55,12 @@ impl ConnectionPin {
     pub fn new(id: u32, position: Point) -> Self {
         ConnectionPin {
             id,
+            class_id: 0,
             position,
             directions: 0xF, // All directions by default
+            exclusive: false,
+            connection_cost: 0.0,
+            inside_offset: 0.0,
         }
     }
 
@@ -56,9 +68,46 @@ impl ConnectionPin {
     pub fn with_directions(id: u32, position: Point, directions: u32) -> Self {
         ConnectionPin {
             id,
+            class_id: 0,
             position,
             directions,
+            exclusive: false,
+            connection_cost: 0.0,
+            inside_offset: 0.0,
         }
+    }
+
+    /// Creates a pin with all parameters
+    pub fn with_all(id: u32, class_id: u32, position: Point, directions: u32, inside_offset: f64) -> Self {
+        ConnectionPin {
+            id,
+            class_id,
+            position,
+            directions,
+            exclusive: false,
+            connection_cost: 0.0,
+            inside_offset,
+        }
+    }
+
+    /// Sets the exclusive flag
+    pub fn set_exclusive(&mut self, exclusive: bool) {
+        self.exclusive = exclusive;
+    }
+
+    /// Returns whether this pin is exclusive
+    pub fn is_exclusive(&self) -> bool {
+        self.exclusive
+    }
+
+    /// Sets the connection cost
+    pub fn set_connection_cost(&mut self, cost: f64) {
+        self.connection_cost = cost;
+    }
+
+    /// Returns the connection cost
+    pub fn connection_cost(&self) -> f64 {
+        self.connection_cost
     }
 }
 

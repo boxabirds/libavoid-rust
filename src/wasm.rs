@@ -12,6 +12,7 @@ use crate::{
     ShapeRef as RustShapeRef, PolygonInterface, Obstacle,
     BBox as RustBox, Rectangle as RustRectangle,
     JunctionRef as RustJunctionRef,
+    shape::ConnectionPin as RustConnectionPin,
 };
 
 // =============================================================================
@@ -455,6 +456,84 @@ impl ShapeRef {
     #[wasm_bindgen(js_name = setNewPoly)]
     pub fn set_new_poly(&mut self, polygon: &Polygon) {
         self.inner.set_polygon(polygon.inner.clone());
+    }
+}
+
+// =============================================================================
+// ShapeConnectionPin
+// =============================================================================
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub struct ShapeConnectionPin {
+    inner: RustConnectionPin,
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+impl ShapeConnectionPin {
+    /// Create a connection pin on a shape
+    /// shape: The shape to attach the pin to
+    /// class_id: Class ID for grouping pins
+    /// x_offset: X offset from shape center (or proportion if proportional)
+    /// y_offset: Y offset from shape center (or proportion if proportional)
+    /// inside_offset: Offset inside the shape boundary
+    /// vis_dirs: Visibility directions (ConnDir flags)
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        shape: &mut ShapeRef,
+        class_id: u32,
+        x_offset: f64,
+        y_offset: f64,
+        inside_offset: f64,
+        vis_dirs: u32,
+    ) -> ShapeConnectionPin {
+        let position = RustPoint::new(x_offset, y_offset);
+        let pin = RustConnectionPin::with_all(class_id, class_id, position, vis_dirs, inside_offset);
+        shape.inner.add_connection_pin(pin.clone());
+        ShapeConnectionPin { inner: pin }
+    }
+
+    /// Create a connection pin on a junction
+    #[wasm_bindgen(js_name = createOnJunction)]
+    pub fn create_on_junction(
+        _junction: &JunctionRef,
+        class_id: u32,
+        vis_dirs: Option<u32>,
+    ) -> ShapeConnectionPin {
+        let dirs = vis_dirs.unwrap_or(CONN_DIR_ALL);
+        let pin = RustConnectionPin::with_directions(class_id, RustPoint::default(), dirs);
+        ShapeConnectionPin { inner: pin }
+    }
+
+    /// Set the connection cost for this pin
+    #[wasm_bindgen(js_name = setConnectionCost)]
+    pub fn set_connection_cost(&mut self, cost: f64) {
+        self.inner.set_connection_cost(cost);
+    }
+
+    /// Get the pin's position
+    #[wasm_bindgen]
+    pub fn position(&self) -> Point {
+        Point { inner: self.inner.position }
+    }
+
+    /// Get the visibility directions
+    #[wasm_bindgen]
+    pub fn directions(&self) -> u32 {
+        self.inner.directions
+    }
+
+    /// Set whether this pin is exclusive
+    #[wasm_bindgen(js_name = setExclusive)]
+    pub fn set_exclusive(&mut self, exclusive: bool) {
+        self.inner.set_exclusive(exclusive);
+    }
+
+    /// Check if this pin is exclusive
+    #[wasm_bindgen(js_name = isExclusive)]
+    pub fn is_exclusive(&self) -> bool {
+        self.inner.is_exclusive()
     }
 }
 
