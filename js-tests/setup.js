@@ -51,6 +51,7 @@ beforeAll(async () => {
       Rectangle: libavoidRust.Rectangle,
       JunctionRef: libavoidRust.JunctionRef,
       ShapeConnectionPin: libavoidRust.ShapeConnectionPin,
+      HyperedgeRerouter: libavoidRust.HyperedgeRerouter,
 
       // Router flags (matching libavoid-js)
       PolyLineRouting: 1,

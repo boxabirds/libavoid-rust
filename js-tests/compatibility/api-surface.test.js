@@ -161,13 +161,29 @@ describe('API Surface Compatibility', () => {
     });
   });
 
-  describe('Missing Classes (GAP - need to implement)', () => {
+  describe('HyperedgeRerouter (implemented)', () => {
     beforeEach(({ skip }) => {
       if (!globalThis.Avoid) skip();
     });
 
-    it.fails('has HyperedgeRerouter class', () => {
+    it('has HyperedgeRerouter class', () => {
       expect(globalThis.Avoid.HyperedgeRerouter).toBeDefined();
+      expect(typeof globalThis.Avoid.HyperedgeRerouter).toBe('function');
+    });
+
+    it('HyperedgeRerouter can be created', () => {
+      const rerouter = new globalThis.Avoid.HyperedgeRerouter();
+      expect(rerouter).toBeDefined();
+    });
+
+    it('registerHyperedgeForRerouting returns ID', () => {
+      const router = new globalThis.Avoid.Router(globalThis.Avoid.PolyLineRouting);
+      const junction = new globalThis.Avoid.JunctionRef(router, new globalThis.Avoid.Point(50, 50));
+
+      const rerouter = new globalThis.Avoid.HyperedgeRerouter();
+      const id = rerouter.registerHyperedgeForRerouting(junction);
+      expect(typeof id).toBe('number');
+      expect(id).toBe(0); // First registered hyperedge gets ID 0
     });
   });
 

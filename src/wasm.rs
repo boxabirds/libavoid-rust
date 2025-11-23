@@ -13,6 +13,7 @@ use crate::{
     BBox as RustBox, Rectangle as RustRectangle,
     JunctionRef as RustJunctionRef,
     shape::ConnectionPin as RustConnectionPin,
+    hyperedge::HyperedgeRerouter as RustHyperedgeRerouter,
 };
 
 // =============================================================================
@@ -583,6 +584,41 @@ impl JunctionRef {
     #[wasm_bindgen(js_name = setPosition)]
     pub fn set_position(&mut self, position: &Point) {
         self.inner.set_position(position.inner);
+    }
+}
+
+// =============================================================================
+// HyperedgeRerouter
+// =============================================================================
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub struct HyperedgeRerouter {
+    inner: RustHyperedgeRerouter,
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+impl HyperedgeRerouter {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> HyperedgeRerouter {
+        HyperedgeRerouter {
+            inner: RustHyperedgeRerouter::new(),
+        }
+    }
+
+    /// Register a hyperedge for rerouting based on a junction
+    /// Returns the index/ID of the registered hyperedge
+    #[wasm_bindgen(js_name = registerHyperedgeForRerouting)]
+    pub fn register_hyperedge_for_rerouting(&mut self, junction: &JunctionRef) -> u32 {
+        // Create a new hyperedge with the junction as the starting point
+        use crate::hyperedge::HyperedgeRef;
+        use crate::ConnEnd as RustConnEndType;
+
+        let terminal = RustConnEndType::new(junction.inner.position());
+        let hyperedge = HyperedgeRef::new(self.inner.hyperedges().len() as u32, vec![terminal]);
+        self.inner.register_hyperedge(hyperedge);
+        (self.inner.hyperedges().len() - 1) as u32
     }
 }
 
