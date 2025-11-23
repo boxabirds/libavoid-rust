@@ -11,6 +11,7 @@ categories = ["algorithms", "graphics"]
 
 [dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 
@@ -18,7 +19,7 @@ serde-wasm-bindgen = { version = "0.6", optional = true }
 
 [features]
 default = []
-wasm = ["wasm-bindgen", "serde", "serde-wasm-bindgen"]
+wasm = ["wasm-bindgen", "js-sys", "serde", "serde-wasm-bindgen"]
 
 [lib]
 name = "libavoid"

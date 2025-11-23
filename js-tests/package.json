@@ -1,0 +1,18 @@
+{
+  "name": "libavoid-rust-tests",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Test suite for libavoid-rust WASM bindings",
+  "scripts": {
+    "build:wasm": "cd .. && wasm-pack build --target web --features wasm && cp -r pkg js-tests/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "libavoid-js": "^0.4.5"
+  }
+}

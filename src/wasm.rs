@@ -8,9 +8,8 @@ use wasm_bindgen::prelude::*;
 #[cfg(feature = "wasm")]
 use crate::{
     Router as RustRouter, Point as RustPoint, ConnRef as RustConnRef,
-    ConnEnd as RustConnEnd, ConnType, Polygon as RustPolygon,
-    ShapeRef as RustShapeRef, JunctionRef as RustJunctionRef,
-    HyperedgeRef as RustHyperedgeRef, Rectangle, PolygonInterface,
+    ConnEnd as RustConnEnd, Polygon as RustPolygon,
+    ShapeRef as RustShapeRef, PolygonInterface, Obstacle,
 };
 
 #[cfg(feature = "wasm")]
@@ -149,7 +148,7 @@ impl ConnRef {
     }
 
     #[wasm_bindgen(js_name = setCallback)]
-    pub fn set_callback(&mut self, _callback: &js_sys::Function, _context: &JsValue) {
+    pub fn set_callback(&mut self, _callback: JsValue, _context: JsValue) {
         // TODO: Implement callback support
     }
 
@@ -213,8 +212,9 @@ pub enum RoutingType {
 impl Router {
     #[wasm_bindgen(constructor)]
     pub fn new(routing_type: RoutingType) -> Router {
+        let flags = routing_type as u32;
         Router {
-            inner: RustRouter::new(0),
+            inner: RustRouter::new(flags),
             next_id: 1,
         }
     }
@@ -234,11 +234,9 @@ impl Router {
     }
 }
 
-// Export types for use
+// Initialize WASM module
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(start)]
 pub fn main() {
-    // Initialize WASM
-    #[cfg(feature = "console_error_panic_hook")]
-    console_error_panic_hook::set_once();
+    // WASM initialization complete
 }

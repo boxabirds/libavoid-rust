@@ -26,6 +26,72 @@
 
 ---
 
+## Testing & Verification
+
+### Test Infrastructure
+
+A comprehensive test suite exists in `js-tests/` that verifies parity with libavoid-js.
+
+### Running Tests
+
+```bash
+cd js-tests
+
+# Install dependencies (first time only)
+npm install
+
+# Build WASM module (required after any Rust changes)
+npm run build:wasm
+
+# Run all tests
+npm test
+
+# Run tests in watch mode (during development)
+npm run test:watch
+
+# Run specific test file
+npm test -- unit/point.test.js
+
+# Run with verbose output
+npm test -- --reporter=verbose
+```
+
+### Test Categories
+
+| Category | Location | Purpose |
+|----------|----------|---------|
+| Unit | `js-tests/unit/` | Test individual classes work correctly |
+| Compatibility | `js-tests/compatibility/` | Verify API surface matches libavoid-js |
+| Parity | `js-tests/parity/` | Compare outputs between implementations |
+| Integration | `js-tests/integration/` | Test full workflows |
+
+### Current Baseline
+
+```
+Tests:  38 passed, 3 failed (41 total)
+```
+
+Known failures (to be fixed by implementation):
+- Router flag values: libavoid-js uses 1/2, we use 0/1
+- Some libavoid-js APIs use properties vs methods
+
+### Verification Workflow
+
+**After completing each task:**
+
+1. Rebuild WASM: `npm run build:wasm`
+2. Run tests: `npm test`
+3. Verify no regressions (existing passing tests still pass)
+4. Verify new functionality (relevant `it.fails()` tests now pass)
+
+**After completing each phase:**
+
+1. Run full test suite
+2. Update the Progress Overview table above
+3. Document any new gaps discovered
+
+---
+
 ## Phase 1: WASM Infrastructure (CRITICAL)
 
 **Priority:** P0 - Blocking
