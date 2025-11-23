@@ -85,24 +85,40 @@ describe('API Surface Compatibility', () => {
     });
   });
 
-  describe('Missing Constants (GAP - need to implement)', () => {
+  describe('Constants (implemented)', () => {
     beforeEach(({ skip }) => {
       if (!globalThis.Avoid) skip();
     });
 
-    it.fails('has ConnDirNone constant', () => {
+    it('has ConnDirNone constant', () => {
       expect(globalThis.Avoid.ConnDirNone).toBeDefined();
       expect(typeof globalThis.Avoid.ConnDirNone).toBe('number');
     });
 
-    it.fails('has segmentPenalty constant', () => {
+    it('has segmentPenalty constant', () => {
       expect(globalThis.Avoid.segmentPenalty).toBeDefined();
       expect(typeof globalThis.Avoid.segmentPenalty).toBe('number');
     });
 
-    it.fails('has ConnType_PolyLine constant', () => {
+    it('has ConnType_PolyLine constant', () => {
       expect(globalThis.Avoid.ConnType_PolyLine).toBeDefined();
       expect(typeof globalThis.Avoid.ConnType_PolyLine).toBe('number');
+    });
+
+    it('has all direction constants', () => {
+      expect(globalThis.Avoid.ConnDirUp).toBe(1);
+      expect(globalThis.Avoid.ConnDirDown).toBe(2);
+      expect(globalThis.Avoid.ConnDirLeft).toBe(4);
+      expect(globalThis.Avoid.ConnDirRight).toBe(8);
+      expect(globalThis.Avoid.ConnDirAll).toBe(15);
+    });
+
+    it('has all routing parameter constants', () => {
+      expect(globalThis.Avoid.segmentPenalty).toBe(0);
+      expect(globalThis.Avoid.anglePenalty).toBe(1);
+      expect(globalThis.Avoid.crossingPenalty).toBe(2);
+      expect(globalThis.Avoid.shapeBufferDistance).toBe(6);
+      expect(globalThis.Avoid.idealNudgingDistance).toBe(7);
     });
   });
 

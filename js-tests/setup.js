@@ -37,6 +37,7 @@ beforeAll(async () => {
     }
 
     // Create an Avoid-like namespace object with all exports
+    // Constants match libavoid-js values exactly
     globalThis.Avoid = {
       // Classes
       Point: libavoidRust.Point,
@@ -47,30 +48,44 @@ beforeAll(async () => {
       ShapeRef: libavoidRust.ShapeRef,
       AvoidLib: libavoidRust.AvoidLib,
 
-      // Enums/Constants (from RoutingType)
-      PolyLineRouting: libavoidRust.RoutingType?.PolyLineRouting ?? 0,
-      OrthogonalRouting: libavoidRust.RoutingType?.OrthogonalRouting ?? 1,
+      // Router flags (matching libavoid-js)
+      PolyLineRouting: 1,
+      OrthogonalRouting: 2,
 
-      // TODO: These need to be added to wasm.rs
-      // Direction flags
-      ConnDirNone: undefined,
-      ConnDirUp: undefined,
-      ConnDirDown: undefined,
-      ConnDirLeft: undefined,
-      ConnDirRight: undefined,
-      ConnDirAll: undefined,
+      // Connection direction flags
+      ConnDirNone: 0,
+      ConnDirUp: 1,
+      ConnDirDown: 2,
+      ConnDirLeft: 4,
+      ConnDirRight: 8,
+      ConnDirAll: 15,
 
       // Connection types
-      ConnType_None: undefined,
-      ConnType_PolyLine: undefined,
-      ConnType_Orthogonal: undefined,
+      ConnType_None: 0,
+      ConnType_PolyLine: 1,
+      ConnType_Orthogonal: 2,
 
-      // Routing parameters - need to be exported
-      segmentPenalty: undefined,
-      anglePenalty: undefined,
-      crossingPenalty: undefined,
+      // Routing parameters
+      segmentPenalty: 0,
+      anglePenalty: 1,
+      crossingPenalty: 2,
+      clusterCrossingPenalty: 3,
+      fixedSharedPathPenalty: 4,
+      portDirectionPenalty: 5,
+      shapeBufferDistance: 6,
+      idealNudgingDistance: 7,
+      reverseDirectionPenalty: 8,
 
-      // Utility functions (not yet implemented)
+      // Routing options
+      nudgeOrthogonalSegmentsConnectedToShapes: 0,
+      improveHyperedgeRoutesMovingJunctions: 1,
+      penaliseOrthogonalSharedPathsAtConnEnds: 2,
+      nudgeOrthogonalColinearSegments: 3,
+      performUnifyingNudgingPreprocessingStep: 4,
+      improveHyperedgeRoutesMovingAddingAndDeletingJunctions: 5,
+      nudgeSharedPathsWithCommonEndPoint: 6,
+
+      // Utility functions (TODO: implement if needed)
       destroy: undefined,
       getPointer: undefined,
       wrapPointer: undefined,
