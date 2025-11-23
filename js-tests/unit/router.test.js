@@ -56,5 +56,42 @@ describe('Router', () => {
         router.processTransaction();
       }).not.toThrow();
     });
+
+    it('moveShapeTo accepts shape and polygon', () => {
+      const router = new globalThis.Avoid.Router(globalThis.Avoid.PolyLineRouting);
+      const poly = new globalThis.Avoid.Polygon(4);
+      poly.set_ps(0, new globalThis.Avoid.Point(0, 0));
+      poly.set_ps(1, new globalThis.Avoid.Point(10, 0));
+      poly.set_ps(2, new globalThis.Avoid.Point(10, 10));
+      poly.set_ps(3, new globalThis.Avoid.Point(0, 10));
+
+      const shape = new globalThis.Avoid.ShapeRef(router, poly);
+      router.processTransaction();
+
+      const newPoly = new globalThis.Avoid.Polygon(4);
+      newPoly.set_ps(0, new globalThis.Avoid.Point(100, 100));
+      newPoly.set_ps(1, new globalThis.Avoid.Point(120, 100));
+      newPoly.set_ps(2, new globalThis.Avoid.Point(120, 120));
+      newPoly.set_ps(3, new globalThis.Avoid.Point(100, 120));
+
+      expect(() => {
+        router.moveShapeTo(shape, newPoly);
+        router.processTransaction();
+      }).not.toThrow();
+    });
+  });
+
+  describe('routing parameters', () => {
+    it('setRoutingParameter and routingParameter work together', () => {
+      const router = new globalThis.Avoid.Router(globalThis.Avoid.PolyLineRouting);
+      router.setRoutingParameter(globalThis.Avoid.shapeBufferDistance, 15);
+      expect(router.routingParameter(globalThis.Avoid.shapeBufferDistance)).toBe(15);
+    });
+
+    it('setRoutingOption and routingOption work together', () => {
+      const router = new globalThis.Avoid.Router(globalThis.Avoid.OrthogonalRouting);
+      router.setRoutingOption(globalThis.Avoid.nudgeOrthogonalSegmentsConnectedToShapes, true);
+      expect(router.routingOption(globalThis.Avoid.nudgeOrthogonalSegmentsConnectedToShapes)).toBe(true);
+    });
   });
 });

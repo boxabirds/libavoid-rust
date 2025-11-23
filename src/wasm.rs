@@ -391,10 +391,13 @@ impl ShapeRef {
 // =============================================================================
 
 #[cfg(feature = "wasm")]
+use std::cell::Cell;
+
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub struct Router {
     inner: RustRouter,
-    next_id: u32,
+    next_id: Cell<u32>,
 }
 
 #[cfg(feature = "wasm")]
@@ -406,7 +409,7 @@ impl Router {
     pub fn new(flags: u32) -> Router {
         Router {
             inner: RustRouter::new(flags),
-            next_id: 1,
+            next_id: Cell::new(1),
         }
     }
 
@@ -419,6 +422,18 @@ impl Router {
     #[wasm_bindgen(js_name = moveShape)]
     pub fn move_shape(&mut self, shape: &ShapeRef, x: f64, y: f64) {
         self.inner.move_shape(shape.id(), RustPoint::new(x, y));
+    }
+
+    /// Move shape to a new polygon position
+    #[wasm_bindgen(js_name = moveShapeTo)]
+    pub fn move_shape_to(&mut self, shape: &ShapeRef, new_polygon: &Polygon) {
+        // Calculate the center offset needed to move from current to new polygon center
+        let new_bbox = new_polygon.inner.bounding_rect();
+        let new_center = RustPoint::new(
+            (new_bbox.min.x + new_bbox.max.x) / 2.0,
+            (new_bbox.min.y + new_bbox.max.y) / 2.0,
+        );
+        self.inner.move_shape(shape.id(), new_center);
     }
 
     #[wasm_bindgen(js_name = setRoutingParameter)]
@@ -439,6 +454,24 @@ impl Router {
         self.inner.set_routing_parameter(param, value);
     }
 
+    #[wasm_bindgen(js_name = routingParameter)]
+    pub fn routing_parameter(&self, param: u32) -> f64 {
+        use crate::RoutingParameter;
+        let param = match param {
+            0 => RoutingParameter::SegmentPenalty,
+            1 => RoutingParameter::BendPenalty,
+            2 => RoutingParameter::CrossingPenalty,
+            3 => RoutingParameter::ClusterCrossingPenalty,
+            4 => RoutingParameter::FixedSharedPathPenalty,
+            5 => RoutingParameter::PortDirectionPenalty,
+            6 => RoutingParameter::ShapeBufferDistance,
+            7 => RoutingParameter::IdealNudgingDistance,
+            8 => RoutingParameter::ReverseDirectionPenalty,
+            _ => return 0.0,
+        };
+        self.inner.routing_parameter(param)
+    }
+
     #[wasm_bindgen(js_name = setRoutingOption)]
     pub fn set_routing_option(&mut self, option: u32, value: bool) {
         use crate::RoutingOption;
@@ -452,6 +485,19 @@ impl Router {
         self.inner.set_routing_option(opt, value);
     }
 
+    #[wasm_bindgen(js_name = routingOption)]
+    pub fn routing_option(&self, option: u32) -> bool {
+        use crate::RoutingOption;
+        let opt = match option {
+            0 => RoutingOption::NudgeOrthogonalRoutes,
+            1 => RoutingOption::ImproveHyperedgeRoutes,
+            2 => RoutingOption::PenalisePortDirections,
+            6 => RoutingOption::NudgeSharedPathsWithCommonEndPoint,
+            _ => return false,
+        };
+        self.inner.routing_option(opt)
+    }
+
     #[wasm_bindgen(js_name = deleteShape)]
     pub fn delete_shape(&mut self, shape: &ShapeRef) {
         self.inner.delete_shape(shape.id());
@@ -462,8 +508,17 @@ impl Router {
         self.inner.delete_connector(conn.id());
     }
 
+    /// Output info about the router (for debugging)
+    #[wasm_bindgen(js_name = outputInstanceToSVG)]
+    pub fn output_instance_to_svg(&self) -> String {
+        // Return a simple SVG representation of the router state
+        format!("<!-- Router SVG output not yet implemented -->")
+    }
+
     pub(crate) fn next_id(&self) -> u32 {
-        self.next_id
+        let id = self.next_id.get();
+        self.next_id.set(id + 1);
+        id
     }
 }
 
