@@ -1,0 +1,10 @@
+{
+  "name": "libavoid-rust-node-example",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Node.js example for libavoid-rust",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "node main.mjs"
+  }
+}
