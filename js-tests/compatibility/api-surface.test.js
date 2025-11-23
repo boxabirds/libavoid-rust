@@ -98,13 +98,28 @@ describe('API Surface Compatibility', () => {
     });
   });
 
-  describe('Missing Classes (GAP - need to implement)', () => {
+  describe('JunctionRef (implemented)', () => {
     beforeEach(({ skip }) => {
       if (!globalThis.Avoid) skip();
     });
 
-    it.fails('has JunctionRef class', () => {
+    it('has JunctionRef class', () => {
       expect(globalThis.Avoid.JunctionRef).toBeDefined();
+      expect(typeof globalThis.Avoid.JunctionRef).toBe('function');
+    });
+
+    it('JunctionRef can be created with router and position', () => {
+      const router = new globalThis.Avoid.Router(globalThis.Avoid.PolyLineRouting);
+      const pos = new globalThis.Avoid.Point(50, 50);
+      const junction = new globalThis.Avoid.JunctionRef(router, pos);
+      expect(junction).toBeDefined();
+      expect(typeof junction.id()).toBe('number');
+    });
+  });
+
+  describe('Missing Classes (GAP - need to implement)', () => {
+    beforeEach(({ skip }) => {
+      if (!globalThis.Avoid) skip();
     });
 
     it.fails('has ShapeConnectionPin class', () => {

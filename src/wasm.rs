@@ -11,6 +11,7 @@ use crate::{
     ConnEnd as RustConnEnd, Polygon as RustPolygon,
     ShapeRef as RustShapeRef, PolygonInterface, Obstacle,
     BBox as RustBox, Rectangle as RustRectangle,
+    JunctionRef as RustJunctionRef,
 };
 
 // =============================================================================
@@ -421,9 +422,88 @@ impl ShapeRef {
         }
     }
 
+    /// Create a ShapeRef with a specific ID
+    #[wasm_bindgen(js_name = createWithId)]
+    pub fn create_with_id(_router: &Router, polygon: &Polygon, id: u32) -> ShapeRef {
+        ShapeRef {
+            inner: RustShapeRef::new(id, polygon.inner.clone()),
+        }
+    }
+
     #[wasm_bindgen]
     pub fn id(&self) -> u32 {
         self.inner.id()
+    }
+
+    /// Returns the shape's polygon
+    #[wasm_bindgen]
+    pub fn polygon(&self) -> Polygon {
+        Polygon {
+            inner: self.inner.polygon().clone(),
+        }
+    }
+
+    /// Returns the shape's position (center of bounding box)
+    #[wasm_bindgen]
+    pub fn position(&self) -> Point {
+        Point {
+            inner: self.inner.position(),
+        }
+    }
+
+    /// Updates the shape's polygon
+    #[wasm_bindgen(js_name = setNewPoly)]
+    pub fn set_new_poly(&mut self, polygon: &Polygon) {
+        self.inner.set_polygon(polygon.inner.clone());
+    }
+}
+
+// =============================================================================
+// JunctionRef
+// =============================================================================
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub struct JunctionRef {
+    inner: RustJunctionRef,
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+impl JunctionRef {
+    #[wasm_bindgen(constructor)]
+    pub fn new(router: &Router, position: &Point) -> JunctionRef {
+        let id = router.next_id();
+        JunctionRef {
+            inner: RustJunctionRef::new(id, position.inner),
+        }
+    }
+
+    /// Create a JunctionRef with a specific ID
+    #[wasm_bindgen(js_name = createWithId)]
+    pub fn create_with_id(_router: &Router, position: &Point, id: u32) -> JunctionRef {
+        JunctionRef {
+            inner: RustJunctionRef::new(id, position.inner),
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn id(&self) -> u32 {
+        self.inner.id()
+    }
+
+    /// Returns the junction's position
+    #[wasm_bindgen]
+    pub fn position(&self) -> Point {
+        Point {
+            inner: self.inner.position(),
+        }
+    }
+
+    /// Sets the junction's position
+    #[wasm_bindgen(js_name = setPosition)]
+    pub fn set_position(&mut self, position: &Point) {
+        self.inner.set_position(position.inner);
     }
 }
 

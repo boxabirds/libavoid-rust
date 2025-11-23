@@ -49,6 +49,7 @@ beforeAll(async () => {
       AvoidLib: libavoidRust.AvoidLib,
       Box: libavoidRust.Box,
       Rectangle: libavoidRust.Rectangle,
+      JunctionRef: libavoidRust.JunctionRef,
 
       // Router flags (matching libavoid-js)
       PolyLineRouting: 1,
