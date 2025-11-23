@@ -290,6 +290,15 @@ impl ConnEnd {
             inner: RustConnEnd::new(point.inner),
         }
     }
+
+    /// Create a ConnEnd attached to a shape's connection pin class
+    #[wasm_bindgen(js_name = fromShapePin)]
+    pub fn from_shape_pin(shape: &ShapeRef, pin_class_id: u32) -> ConnEnd {
+        // Use default position (0,0) - will be resolved to actual pin position during routing
+        ConnEnd {
+            inner: RustConnEnd::with_pin(RustPoint::default(), shape.id(), pin_class_id),
+        }
+    }
 }
 
 // =============================================================================
@@ -313,9 +322,29 @@ impl ConnRef {
         }
     }
 
+    /// Create a ConnRef with source and destination endpoints
+    #[wasm_bindgen(js_name = createWithEndpoints)]
+    pub fn create_with_endpoints(router: &Router, src: &ConnEnd, dst: &ConnEnd) -> ConnRef {
+        let id = router.next_id();
+        ConnRef {
+            inner: RustConnRef::with_endpoints(id, src.inner.clone(), dst.inner.clone()),
+        }
+    }
+
+    /// Create a ConnRef with endpoints and a specific ID
+    #[wasm_bindgen(js_name = createWithId)]
+    pub fn create_with_id(router: &Router, src: &ConnEnd, dst: &ConnEnd, id: u32) -> ConnRef {
+        // Note: Using provided ID instead of router.next_id()
+        let _ = router; // Router reference unused but kept for API consistency
+        ConnRef {
+            inner: RustConnRef::with_endpoints(id, src.inner.clone(), dst.inner.clone()),
+        }
+    }
+
     #[wasm_bindgen(js_name = setCallback)]
     pub fn set_callback(&mut self, _callback: JsValue, _context: JsValue) {
-        // TODO: Implement callback support
+        // TODO: Implement callback support - would require storing js_sys::Function
+        // and invoking it when route changes
     }
 
     #[wasm_bindgen(js_name = displayRoute)]
@@ -356,6 +385,18 @@ impl ConnRef {
             crate::ConnType::PolyLine
         };
         self.inner.set_routing_type(conn_type);
+    }
+
+    /// Set whether this connector hates crossings
+    #[wasm_bindgen(js_name = setHateCrossings)]
+    pub fn set_hate_crossings(&mut self, value: bool) {
+        self.inner.set_hate_crossings(value);
+    }
+
+    /// Check if this connector hates crossings
+    #[wasm_bindgen(js_name = doesHateCrossings)]
+    pub fn does_hate_crossings(&self) -> bool {
+        self.inner.does_hate_crossings()
     }
 }
 

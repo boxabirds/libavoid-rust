@@ -64,4 +64,38 @@ describe('ConnRef', () => {
       expect(() => conn.setCallback(callback, conn)).not.toThrow();
     });
   });
+
+  describe('hate crossings', () => {
+    it('setHateCrossings and doesHateCrossings work together', () => {
+      const conn = new globalThis.Avoid.ConnRef(router);
+
+      expect(conn.doesHateCrossings()).toBe(false);
+      conn.setHateCrossings(true);
+      expect(conn.doesHateCrossings()).toBe(true);
+    });
+  });
+
+  describe('factory methods', () => {
+    it('createWithEndpoints creates connector with endpoints', () => {
+      const srcPoint = new globalThis.Avoid.Point(0, 0);
+      const dstPoint = new globalThis.Avoid.Point(100, 100);
+      const srcEnd = new globalThis.Avoid.ConnEnd(srcPoint);
+      const dstEnd = new globalThis.Avoid.ConnEnd(dstPoint);
+
+      const conn = globalThis.Avoid.ConnRef.createWithEndpoints(router, srcEnd, dstEnd);
+      expect(conn).toBeDefined();
+      expect(typeof conn.id()).toBe('number');
+    });
+
+    it('createWithId creates connector with specific ID', () => {
+      const srcPoint = new globalThis.Avoid.Point(0, 0);
+      const dstPoint = new globalThis.Avoid.Point(100, 100);
+      const srcEnd = new globalThis.Avoid.ConnEnd(srcPoint);
+      const dstEnd = new globalThis.Avoid.ConnEnd(dstPoint);
+
+      const conn = globalThis.Avoid.ConnRef.createWithId(router, srcEnd, dstEnd, 999);
+      expect(conn).toBeDefined();
+      expect(conn.id()).toBe(999);
+    });
+  });
 });

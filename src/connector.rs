@@ -89,6 +89,8 @@ pub struct ConnRef {
     active: bool,
     /// Callback function called when route changes
     callback: Option<ConnectorCallback>,
+    /// Whether this connector hates crossing other connectors
+    hate_crossings: bool,
 }
 
 impl ConnRef {
@@ -106,6 +108,7 @@ impl ConnRef {
             has_fixed_route: false,
             active: true,
             callback: None,
+            hate_crossings: false,
         }
     }
 
@@ -123,7 +126,18 @@ impl ConnRef {
             has_fixed_route: false,
             active: true,
             callback: None,
+            hate_crossings: false,
         }
+    }
+
+    /// Sets whether this connector hates crossing other connectors
+    pub fn set_hate_crossings(&mut self, value: bool) {
+        self.hate_crossings = value;
+    }
+
+    /// Returns whether this connector hates crossing other connectors
+    pub fn does_hate_crossings(&self) -> bool {
+        self.hate_crossings
     }
 
     /// Returns the connector's unique ID
