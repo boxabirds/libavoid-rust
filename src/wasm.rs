@@ -734,6 +734,38 @@ impl Router {
         self.inner.routing_option(opt)
     }
 
+    /// Add a shape to the router for routing consideration
+    #[wasm_bindgen(js_name = addShape)]
+    pub fn add_shape(&mut self, shape: &ShapeRef) {
+        self.inner.add_shape(shape.inner.polygon().clone(), shape.id());
+    }
+
+    /// Add a connector to the router for routing
+    #[wasm_bindgen(js_name = addConnector)]
+    pub fn add_connector(&mut self, conn: &ConnRef) {
+        self.inner.add_connector(conn.inner.clone());
+    }
+
+    /// Get the display route for a connector by ID
+    /// Use this after processTransaction to get the computed route
+    #[wasm_bindgen(js_name = getConnectorRoute)]
+    pub fn get_connector_route(&self, conn_id: u32) -> Option<Polygon> {
+        self.inner.get_connector(conn_id)
+            .and_then(|c| c.display_route())
+            .map(|r| Polygon { inner: r.clone() })
+    }
+
+    /// Update a connector's endpoints in the router
+    /// Call this after modifying connector endpoints to sync with router
+    #[wasm_bindgen(js_name = updateConnector)]
+    pub fn update_connector(&mut self, conn: &ConnRef) {
+        if let Some(internal_conn) = self.inner.get_connector_mut(conn.id()) {
+            let (src, dst) = conn.inner.endpoint_conn_ends();
+            internal_conn.set_source_endpoint(src.clone());
+            internal_conn.set_dest_endpoint(dst.clone());
+        }
+    }
+
     #[wasm_bindgen(js_name = deleteShape)]
     pub fn delete_shape(&mut self, shape: &ShapeRef) {
         self.inner.delete_shape(shape.id());

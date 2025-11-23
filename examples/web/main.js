@@ -86,14 +86,15 @@ async function main() {
   // Create connector using factory method (libavoid-rust API)
   // Note: libavoid-js uses: new ConnRef(router, srcConnEnd, dstConnEnd)
   const connRef = ConnRef.createWithEndpoints(router, srcConnEnd, dstConnEnd);
+  router.addConnector(connRef);  // Register with router
   log(`\nCreated connector with ID: ${connRef.id()}`);
 
   // Process initial routing
   router.processTransaction();
   log('Processed initial transaction.');
 
-  // Display initial route
-  let route = connRef.displayRoute();
+  // Display initial route (get from router since it owns the routed connector)
+  let route = router.getConnectorRoute(connRef.id());
   if (route && route.size() > 0) {
     log('\nInitial route:');
     log('----------');
@@ -112,6 +113,7 @@ async function main() {
   shapePoly.set_ps(1, new Point(2.5, 1.5));
   shapePoly.set_ps(2, new Point(1.5, 2.5));
   const shapeRef = new ShapeRef(router, shapePoly);
+  router.addShape(shapeRef);  // Register with router
   log(`Created shape with ID: ${shapeRef.id()}`);
   drawShape(shapePoly);
 
@@ -120,7 +122,7 @@ async function main() {
   log('Processed transaction after adding shape.');
 
   // Display route after shape added
-  route = connRef.displayRoute();
+  route = router.getConnectorRoute(connRef.id());
   if (route && route.size() > 0) {
     log('\nRoute after adding shape:');
     log('----------');
@@ -129,18 +131,22 @@ async function main() {
       log(`  (${pt.x.toFixed(2)}, ${pt.y.toFixed(2)})`);
     }
     log('----------');
+    log(`Route has ${route.size()} points`);
     drawRoute(route, 'green');
+  } else {
+    log('\nNo route after adding shape!');
   }
 
   // Update destination endpoint
   log('\nShifting destination endpoint...');
   const dstPt2 = new Point(6, 4.5);
   connRef.setDestEndpoint(new ConnEnd(dstPt2));
+  router.updateConnector(connRef);  // Sync with router
   router.processTransaction();
   log(`New destination: (${dstPt2.x}, ${dstPt2.y})`);
 
   // Display route after endpoint shift
-  route = connRef.displayRoute();
+  route = router.getConnectorRoute(connRef.id());
   if (route && route.size() > 0) {
     log('\nRoute after shifting endpoint:');
     log('----------');
@@ -158,7 +164,7 @@ async function main() {
   router.processTransaction();
 
   // Display final route
-  route = connRef.displayRoute();
+  route = router.getConnectorRoute(connRef.id());
   if (route && route.size() > 0) {
     log('\nFinal route after moving shape:');
     log('----------');
