@@ -13,7 +13,7 @@ import init, {
   ConnRef,
   ConnEnd,
   ShapeRef
-} from '../../js-tests/pkg/libavoid.js';
+} from './pkg/libavoid.js';
 
 // Constants (matching libavoid-js)
 const PolyLineRouting = 1;
