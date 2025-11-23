@@ -47,6 +47,8 @@ beforeAll(async () => {
       ConnEnd: libavoidRust.ConnEnd,
       ShapeRef: libavoidRust.ShapeRef,
       AvoidLib: libavoidRust.AvoidLib,
+      Box: libavoidRust.Box,
+      Rectangle: libavoidRust.Rectangle,
 
       // Router flags (matching libavoid-js)
       PolyLineRouting: 1,

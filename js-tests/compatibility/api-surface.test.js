@@ -59,17 +59,48 @@ describe('API Surface Compatibility', () => {
     });
   });
 
-  describe('Missing Classes (GAP - need to implement)', () => {
+  describe('Geometry Classes (implemented)', () => {
     beforeEach(({ skip }) => {
       if (!globalThis.Avoid) skip();
     });
 
-    it.fails('has Rectangle class', () => {
+    it('has Rectangle class', () => {
       expect(globalThis.Avoid.Rectangle).toBeDefined();
+      expect(typeof globalThis.Avoid.Rectangle).toBe('function');
     });
 
-    it.fails('has Box class', () => {
+    it('has Box class', () => {
       expect(globalThis.Avoid.Box).toBeDefined();
+      expect(typeof globalThis.Avoid.Box).toBe('function');
+    });
+
+    it('Rectangle can be created with center, width, height', () => {
+      const center = new globalThis.Avoid.Point(10, 20);
+      const rect = new globalThis.Avoid.Rectangle(center, 50, 30);
+      expect(rect.width()).toBe(50);
+      expect(rect.height()).toBe(30);
+    });
+
+    it('Box has min/max properties', () => {
+      const box = globalThis.Avoid.Box.fromCoords(0, 0, 100, 50);
+      expect(box.width()).toBe(100);
+      expect(box.height()).toBe(50);
+    });
+
+    it('Polygon has boundingRectPolygon method', () => {
+      const poly = new globalThis.Avoid.Polygon(4);
+      poly.set_ps(0, new globalThis.Avoid.Point(0, 0));
+      poly.set_ps(1, new globalThis.Avoid.Point(10, 0));
+      poly.set_ps(2, new globalThis.Avoid.Point(10, 10));
+      poly.set_ps(3, new globalThis.Avoid.Point(0, 10));
+      const bbox = poly.boundingRectPolygon();
+      expect(bbox.size()).toBe(4);
+    });
+  });
+
+  describe('Missing Classes (GAP - need to implement)', () => {
+    beforeEach(({ skip }) => {
+      if (!globalThis.Avoid) skip();
     });
 
     it.fails('has JunctionRef class', () => {

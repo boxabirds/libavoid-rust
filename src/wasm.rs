@@ -10,6 +10,7 @@ use crate::{
     Router as RustRouter, Point as RustPoint, ConnRef as RustConnRef,
     ConnEnd as RustConnEnd, Polygon as RustPolygon,
     ShapeRef as RustShapeRef, PolygonInterface, Obstacle,
+    BBox as RustBox, Rectangle as RustRectangle,
 };
 
 // =============================================================================
@@ -102,6 +103,14 @@ impl Point {
     pub fn new(x: f64, y: f64) -> Point {
         Point {
             inner: RustPoint::new(x, y),
+        }
+    }
+
+    /// Create a Point at origin (0, 0)
+    #[wasm_bindgen(js_name = origin)]
+    pub fn origin() -> Point {
+        Point {
+            inner: RustPoint::default(),
         }
     }
 
@@ -211,6 +220,54 @@ impl Polygon {
     #[wasm_bindgen(js_name = setPoint)]
     pub fn set_point(&mut self, index: usize, point: &Point) {
         self.set_ps(index, point);
+    }
+
+    #[wasm_bindgen]
+    pub fn id(&self) -> u32 {
+        self.inner.id()
+    }
+
+    #[wasm_bindgen]
+    pub fn at(&self, index: usize) -> Option<Point> {
+        if index < self.inner.size() {
+            Some(Point {
+                inner: *self.inner.at(index),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Returns the bounding rectangle as a polygon
+    #[wasm_bindgen(js_name = boundingRectPolygon)]
+    pub fn bounding_rect_polygon(&self) -> Polygon {
+        let bbox = self.inner.bounding_rect();
+        let mut poly = RustPolygon::with_capacity(4);
+        poly.push(bbox.min);
+        poly.push(RustPoint::new(bbox.max.x, bbox.min.y));
+        poly.push(bbox.max);
+        poly.push(RustPoint::new(bbox.min.x, bbox.max.y));
+        Polygon { inner: poly }
+    }
+
+    /// Returns the bounding box offset by the given amount
+    #[wasm_bindgen(js_name = offsetBoundingBox)]
+    pub fn offset_bounding_box(&self, offset: f64) -> Box {
+        let bbox = self.inner.bounding_rect();
+        Box {
+            inner: RustBox::new(
+                RustPoint::new(bbox.min.x - offset, bbox.min.y - offset),
+                RustPoint::new(bbox.max.x + offset, bbox.max.y + offset),
+            ),
+        }
+    }
+
+    /// Returns an offset polygon
+    #[wasm_bindgen(js_name = offsetPolygon)]
+    pub fn offset_polygon(&self, offset: f64) -> Polygon {
+        Polygon {
+            inner: self.inner.offset_polygon(offset),
+        }
     }
 }
 
@@ -407,6 +464,126 @@ impl Router {
 
     pub(crate) fn next_id(&self) -> u32 {
         self.next_id
+    }
+}
+
+// =============================================================================
+// Box
+// =============================================================================
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub struct Box {
+    inner: RustBox,
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+impl Box {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Box {
+        Box {
+            inner: RustBox::new(RustPoint::default(), RustPoint::default()),
+        }
+    }
+
+    /// Create a Box from coordinates
+    #[wasm_bindgen(js_name = fromCoords)]
+    pub fn from_coords(x1: f64, y1: f64, x2: f64, y2: f64) -> Box {
+        Box {
+            inner: RustBox::from_coords(x1, y1, x2, y2),
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn min(&self) -> Point {
+        Point { inner: self.inner.min }
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_min(&mut self, point: &Point) {
+        self.inner.min = point.inner;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn max(&self) -> Point {
+        Point { inner: self.inner.max }
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_max(&mut self, point: &Point) {
+        self.inner.max = point.inner;
+    }
+
+    #[wasm_bindgen]
+    pub fn width(&self) -> f64 {
+        self.inner.width()
+    }
+
+    #[wasm_bindgen]
+    pub fn height(&self) -> f64 {
+        self.inner.height()
+    }
+
+    /// Returns length along the specified dimension (0 = width, 1 = height)
+    #[wasm_bindgen]
+    pub fn length(&self, dimension: usize) -> f64 {
+        match dimension {
+            0 => self.inner.width(),
+            1 => self.inner.height(),
+            _ => self.inner.length(),
+        }
+    }
+
+    /// Checks if the box contains a point
+    #[wasm_bindgen]
+    pub fn contains(&self, point: &Point) -> bool {
+        self.inner.contains(&point.inner)
+    }
+}
+
+// =============================================================================
+// Rectangle
+// =============================================================================
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub struct Rectangle {
+    inner: RustRectangle,
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+impl Rectangle {
+    /// Create a rectangle from center point, width, and height
+    #[wasm_bindgen(constructor)]
+    pub fn new(center: &Point, width: f64, height: f64) -> Rectangle {
+        Rectangle {
+            inner: RustRectangle::new(center.inner, width, height),
+        }
+    }
+
+    /// Create a rectangle from two corner points
+    #[wasm_bindgen(js_name = fromCorners)]
+    pub fn from_corners(p1: &Point, p2: &Point) -> Rectangle {
+        Rectangle {
+            inner: RustRectangle::new_from_points(p1.inner, p2.inner),
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn width(&self) -> f64 {
+        self.inner.width()
+    }
+
+    #[wasm_bindgen]
+    pub fn height(&self) -> f64 {
+        self.inner.height()
+    }
+
+    #[wasm_bindgen]
+    pub fn center(&self) -> Point {
+        Point { inner: self.inner.center() }
     }
 }
 
