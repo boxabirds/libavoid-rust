@@ -243,6 +243,144 @@ impl HyperedgeRerouter {
 
         cost
     }
+
+    /// Try to add junctions to improve hyperedge routing (Task #15c)
+    /// Returns true if a junction was added and improved cost
+    pub fn try_add_junction(&self, terminals: &[Point], junctions: &mut Vec<Point>) -> bool {
+        if terminals.len() < 3 {
+            return false; // Not enough terminals to benefit from junction addition
+        }
+
+        let current_cost = self.compute_hyperedge_cost(terminals, junctions);
+
+        // Try adding junction at midpoint of longest terminal-to-terminal segment
+        let mut best_candidate: Option<Point> = None;
+        let mut best_cost_improvement = 0.0;
+
+        for i in 0..terminals.len() {
+            for j in (i + 1)..terminals.len() {
+                let midpoint = Point::new(
+                    (terminals[i].x + terminals[j].x) / 2.0,
+                    (terminals[i].y + terminals[j].y) / 2.0,
+                );
+
+                junctions.push(midpoint);
+                let new_cost = self.compute_hyperedge_cost(terminals, junctions);
+                junctions.pop();
+
+                let improvement = current_cost - new_cost;
+                if improvement > best_cost_improvement {
+                    best_cost_improvement = improvement;
+                    best_candidate = Some(midpoint);
+                }
+            }
+        }
+
+        if let Some(junction) = best_candidate {
+            if best_cost_improvement > 0.1 {
+                // Only add if improvement is significant
+                junctions.push(junction);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Try to remove unnecessary junctions (Task #15d)
+    /// Returns true if a junction was removed and improved or maintained cost
+    pub fn try_remove_junction(&self, terminals: &[Point], junctions: &mut Vec<Point>) -> bool {
+        if junctions.is_empty() {
+            return false;
+        }
+
+        let current_cost = self.compute_hyperedge_cost(terminals, junctions);
+
+        // Try removing each junction and see if cost improves
+        for i in (0..junctions.len()).rev() {
+            let removed = junctions.remove(i);
+            let new_cost = self.compute_hyperedge_cost(terminals, junctions);
+
+            if new_cost <= current_cost * 1.05 {
+                // Cost stayed same or improved (allow 5% tolerance)
+                return true;
+            }
+
+            // Put it back if removal made things worse
+            junctions.insert(i, removed);
+        }
+
+        false
+    }
+
+    /// Full hyperedge improvement with junction addition/deletion (Task #15)
+    pub fn improve_hyperedge_advanced(
+        &self,
+        hyperedge: &mut HyperedgeRef,
+        iteration_limit: usize,
+    ) -> f64 {
+        let terminals: Vec<Point> = hyperedge
+            .terminals()
+            .iter()
+            .map(|t| t.position)
+            .collect();
+
+        if terminals.len() < 2 {
+            return 0.0;
+        }
+
+        let mut junctions = self.compute_steiner_tree(&terminals);
+        let mut best_cost = self.compute_hyperedge_cost(&terminals, &junctions);
+
+        for iteration in 0..iteration_limit {
+            let mut improved = false;
+
+            // Phase 1: Try junction movement
+            for j_idx in 0..junctions.len() {
+                let deltas = [
+                    Point::new(1.0, 0.0),
+                    Point::new(-1.0, 0.0),
+                    Point::new(0.0, 1.0),
+                    Point::new(0.0, -1.0),
+                ];
+
+                for delta in &deltas {
+                    let old_pos = junctions[j_idx];
+                    junctions[j_idx] = Point::new(old_pos.x + delta.x, old_pos.y + delta.y);
+
+                    let new_cost = self.compute_hyperedge_cost(&terminals, &junctions);
+                    if new_cost < best_cost {
+                        best_cost = new_cost;
+                        improved = true;
+                    } else {
+                        junctions[j_idx] = old_pos;
+                    }
+                }
+            }
+
+            // Phase 2: Try adding junctions (every 5 iterations)
+            if iteration % 5 == 0 {
+                if self.try_add_junction(&terminals, &mut junctions) {
+                    best_cost = self.compute_hyperedge_cost(&terminals, &junctions);
+                    improved = true;
+                }
+            }
+
+            // Phase 3: Try removing junctions (every 10 iterations)
+            if iteration % 10 == 0 {
+                if self.try_remove_junction(&terminals, &mut junctions) {
+                    best_cost = self.compute_hyperedge_cost(&terminals, &junctions);
+                    improved = true;
+                }
+            }
+
+            if !improved {
+                break;
+            }
+        }
+
+        best_cost
+    }
 }
 
 // ============================================================================

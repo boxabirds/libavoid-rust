@@ -91,6 +91,8 @@ pub struct PathFinder {
     shared_path_at_end_penalty: f64,
     /// Whether to apply shared path penalty (controlled by routing option)
     penalise_shared_paths_at_ends: bool,
+    /// Cost for crossing cluster boundaries (Task #17)
+    cluster_crossing_penalty: f64,
 }
 
 impl PathFinder {
@@ -104,6 +106,7 @@ impl PathFinder {
             reverse_penalty: DEFAULT_REVERSE_PENALTY,
             shared_path_at_end_penalty: 0.0,
             penalise_shared_paths_at_ends: false,
+            cluster_crossing_penalty: 0.0,
         }
     }
 
@@ -122,6 +125,7 @@ impl PathFinder {
             reverse_penalty,
             shared_path_at_end_penalty: 0.0,
             penalise_shared_paths_at_ends: false,
+            cluster_crossing_penalty: 0.0,
         }
     }
 
@@ -159,6 +163,11 @@ impl PathFinder {
     /// Sets the reverse direction penalty
     pub fn set_reverse_penalty(&mut self, penalty: f64) {
         self.reverse_penalty = penalty;
+    }
+
+    /// Sets the cluster crossing penalty
+    pub fn set_cluster_crossing_penalty(&mut self, penalty: f64) {
+        self.cluster_crossing_penalty = penalty;
     }
 
     /// Finds the shortest path from start to goal using A* with cost penalties

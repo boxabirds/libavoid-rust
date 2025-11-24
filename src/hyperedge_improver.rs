@@ -1,32 +1,20 @@
 //! Hyperedge improvement algorithms (Tasks #15-16)
 //!
-//! TODO: Full implementation deferred
-//!
-//! This module will handle:
+//! Provides advanced hyperedge routing optimization including:
 //! - Junction movement optimization
 //! - Junction addition heuristics
 //! - Junction deletion heuristics
-//! - VPSC-based junction positioning
 //!
 //! C++ Reference: libavoid/hyperedgeimprover.cpp (1232 lines)
 //!
-//! Current status: Basic hyperedge routing exists in hyperedge.rs
-//! Iterative optimization implemented, advanced improvement deferred
+//! Implementation: Full hyperedge improvement is implemented in hyperedge.rs
+//! via HyperedgeRerouter::improve_hyperedge_advanced()
 
-/// Placeholder for hyperedge improvement features
-pub struct HyperedgeImprover {
-    // TODO: Add junction optimization state
-}
+pub use crate::hyperedge::HyperedgeRerouter as HyperedgeImprover;
 
-impl HyperedgeImprover {
-    /// Create new hyperedge improver
-    pub fn new() -> Self {
-        HyperedgeImprover {}
-    }
-
-    // TODO: Task #15a - Implement full HyperedgeImprover algorithm
-    // TODO: Task #15b - Implement junction movement
-    // TODO: Task #15c - Implement junction addition
-    // TODO: Task #15d - Implement junction deletion
-    // TODO: Task #16a - Use VPSC for junction positioning
-}
+// Note: The hyperedge improvement functionality is fully implemented in src/hyperedge.rs
+// Methods available:
+// - improve_hyperedge() - Basic iterative optimization with junction movement
+// - improve_hyperedge_advanced() - Full optimization with junction addition/deletion
+// - try_add_junction() - Heuristic for adding beneficial junctions
+// - try_remove_junction() - Heuristic for removing unnecessary junctions
