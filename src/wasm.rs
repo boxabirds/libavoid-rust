@@ -54,11 +54,13 @@ pub mod constants {
     /// Routing options (for setRoutingOption)
     pub const NUDGE_ORTHOGONAL_SEGMENTS: u32 = 0;
     pub const IMPROVE_HYPEREDGE_ROUTES: u32 = 1;
-    pub const PENALISE_SHARED_PATHS: u32 = 2;
+    pub const PENALISE_PORT_DIRECTIONS: u32 = 2;
     pub const NUDGE_COLINEAR_SEGMENTS: u32 = 3;
     pub const UNIFYING_NUDGING_STEP: u32 = 4;
     pub const IMPROVE_HYPEREDGE_ADD_DELETE: u32 = 5;
     pub const NUDGE_SHARED_PATHS_COMMON_END: u32 = 6;
+    pub const NUDGE_SEGMENTS_CONNECTED_TO_SHAPES: u32 = 7;
+    pub const PENALISE_SHARED_PATHS_AT_CONN_ENDS: u32 = 8;
 }
 
 #[cfg(feature = "wasm")]
@@ -727,10 +729,15 @@ impl Router {
     pub fn set_routing_option(&mut self, option: u32, value: bool) {
         use crate::RoutingOption;
         let opt = match option {
-            0 => RoutingOption::NudgeOrthogonalRoutes,
-            1 => RoutingOption::ImproveHyperedgeRoutes,
-            2 => RoutingOption::PenalisePortDirections,
-            6 => RoutingOption::NudgeSharedPathsWithCommonEndPoint,
+            NUDGE_ORTHOGONAL_SEGMENTS => RoutingOption::NudgeOrthogonalRoutes,
+            IMPROVE_HYPEREDGE_ROUTES => RoutingOption::ImproveHyperedgeRoutes,
+            PENALISE_PORT_DIRECTIONS => RoutingOption::PenalisePortDirections,
+            NUDGE_COLINEAR_SEGMENTS => RoutingOption::NudgeOrthogonalTouchingColinearSegments,
+            UNIFYING_NUDGING_STEP => RoutingOption::PerformUnifyingNudgingPreprocessingStep,
+            IMPROVE_HYPEREDGE_ADD_DELETE => RoutingOption::ImproveHyperedgeRoutesMovingAddingAndDeletingJunctions,
+            NUDGE_SHARED_PATHS_COMMON_END => RoutingOption::NudgeSharedPathsWithCommonEndPoint,
+            NUDGE_SEGMENTS_CONNECTED_TO_SHAPES => RoutingOption::NudgeOrthogonalSegmentsConnectedToShapes,
+            PENALISE_SHARED_PATHS_AT_CONN_ENDS => RoutingOption::PenaliseOrthogonalSharedPathsAtConnEnds,
             _ => return,
         };
         self.inner.set_routing_option(opt, value);
@@ -740,10 +747,15 @@ impl Router {
     pub fn routing_option(&self, option: u32) -> bool {
         use crate::RoutingOption;
         let opt = match option {
-            0 => RoutingOption::NudgeOrthogonalRoutes,
-            1 => RoutingOption::ImproveHyperedgeRoutes,
-            2 => RoutingOption::PenalisePortDirections,
-            6 => RoutingOption::NudgeSharedPathsWithCommonEndPoint,
+            NUDGE_ORTHOGONAL_SEGMENTS => RoutingOption::NudgeOrthogonalRoutes,
+            IMPROVE_HYPEREDGE_ROUTES => RoutingOption::ImproveHyperedgeRoutes,
+            PENALISE_PORT_DIRECTIONS => RoutingOption::PenalisePortDirections,
+            NUDGE_COLINEAR_SEGMENTS => RoutingOption::NudgeOrthogonalTouchingColinearSegments,
+            UNIFYING_NUDGING_STEP => RoutingOption::PerformUnifyingNudgingPreprocessingStep,
+            IMPROVE_HYPEREDGE_ADD_DELETE => RoutingOption::ImproveHyperedgeRoutesMovingAddingAndDeletingJunctions,
+            NUDGE_SHARED_PATHS_COMMON_END => RoutingOption::NudgeSharedPathsWithCommonEndPoint,
+            NUDGE_SEGMENTS_CONNECTED_TO_SHAPES => RoutingOption::NudgeOrthogonalSegmentsConnectedToShapes,
+            PENALISE_SHARED_PATHS_AT_CONN_ENDS => RoutingOption::PenaliseOrthogonalSharedPathsAtConnEnds,
             _ => return false,
         };
         self.inner.routing_option(opt)

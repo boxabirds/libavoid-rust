@@ -59,6 +59,16 @@ pub enum RoutingOption {
     PenalisePortDirections,
     /// Nudge shared paths to common routes
     NudgeSharedPathsWithCommonEndPoint,
+    /// Nudge orthogonal segments connected to shapes
+    NudgeOrthogonalSegmentsConnectedToShapes,
+    /// Penalise orthogonal shared paths at connector ends
+    PenaliseOrthogonalSharedPathsAtConnEnds,
+    /// Nudge orthogonal touching colinear segments
+    NudgeOrthogonalTouchingColinearSegments,
+    /// Perform unifying nudging preprocessing step
+    PerformUnifyingNudgingPreprocessingStep,
+    /// Improve hyperedge routes by moving/adding/deleting junctions
+    ImproveHyperedgeRoutesMovingAddingAndDeletingJunctions,
 }
 
 /// The main router instance for managing connector routing
@@ -158,11 +168,16 @@ impl Router {
         router.parameters.insert(RoutingParameter::IdealNudgingDistance, 4.0);
         router.parameters.insert(RoutingParameter::ShapeBufferDistance, 0.0);  // C++ default: 0 (implicit)
 
-        // Set default options
+        // Set default options (matching C++ libavoid router.cpp:93-101)
         router.options.insert(RoutingOption::NudgeOrthogonalRoutes, false);
         router.options.insert(RoutingOption::ImproveHyperedgeRoutes, true);
         router.options.insert(RoutingOption::PenalisePortDirections, false);
         router.options.insert(RoutingOption::NudgeSharedPathsWithCommonEndPoint, false);
+        router.options.insert(RoutingOption::NudgeOrthogonalSegmentsConnectedToShapes, false);
+        router.options.insert(RoutingOption::PenaliseOrthogonalSharedPathsAtConnEnds, false);
+        router.options.insert(RoutingOption::NudgeOrthogonalTouchingColinearSegments, false);
+        router.options.insert(RoutingOption::PerformUnifyingNudgingPreprocessingStep, true);
+        router.options.insert(RoutingOption::ImproveHyperedgeRoutesMovingAddingAndDeletingJunctions, false);
 
         router
     }
