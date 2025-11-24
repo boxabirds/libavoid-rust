@@ -16,6 +16,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 
 [dev-dependencies]
+criterion = "0.5"
 
 [features]
 default = []
@@ -29,3 +30,10 @@ crate-type = ["cdylib", "rlib"]
 [[example]]
 name = "simple_routing"
 path = "examples/simple_routing.rs"
+
+[[bench]]
+name = "routing_bench"
+harness = false
+
+[profile.bench]
+opt-level = 3

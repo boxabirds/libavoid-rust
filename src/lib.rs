@@ -51,18 +51,22 @@ pub mod graph;
 pub mod orthogonal;
 pub mod junction;
 pub mod hyperedge;
+pub mod cluster;
+pub mod vpsc;
+pub mod channel;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
 // Re-export commonly used types
 pub use geometry::{Point, Box as BBox, Polygon, Rectangle, Edge, PolygonInterface};
-pub use router::{Router, RouterFlags, RoutingParameter, RoutingOption};
+pub use router::{Router, RouterFlags, RoutingParameter, RoutingOption, RouterDebugState, ROUTER_FLAG_NONE, ROUTER_FLAG_USE_TRANSACTIONS};
 pub use connector::{ConnRef, ConnEnd, ConnType};
 pub use obstacle::Obstacle;
 pub use shape::ShapeRef;
 pub use junction::JunctionRef;
 pub use hyperedge::{HyperedgeRef, HyperedgeRerouter};
+pub use cluster::ClusterRef;
 pub use action::{ActionInfo, ActionType};
 pub use connector::{ConnDirFlags, Checkpoint, CONN_DIR_ALL, CONN_DIR_NONE, CONN_DIR_UP, CONN_DIR_DOWN, CONN_DIR_LEFT, CONN_DIR_RIGHT};
 

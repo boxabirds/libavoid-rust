@@ -17,6 +17,10 @@ pub struct JunctionRef {
     attached_connectors: HashSet<u32>,
     /// Whether this junction is active
     active: bool,
+    /// Whether the junction position is fixed (cannot be optimized)
+    position_fixed: bool,
+    /// Recommended position after optimization (may differ from current position)
+    recommended_position: Option<Point>,
 }
 
 impl JunctionRef {
@@ -27,6 +31,8 @@ impl JunctionRef {
             position,
             attached_connectors: HashSet::new(),
             active: true,
+            position_fixed: false,
+            recommended_position: None,
         }
     }
 
@@ -73,6 +79,56 @@ impl JunctionRef {
     /// Returns the attached connector IDs
     pub fn attached_connectors(&self) -> &HashSet<u32> {
         &self.attached_connectors
+    }
+
+    /// Returns whether the junction position is fixed
+    ///
+    /// When fixed, the junction position cannot be changed by optimization algorithms.
+    pub fn position_fixed(&self) -> bool {
+        self.position_fixed
+    }
+
+    /// Sets whether the junction position is fixed
+    ///
+    /// When fixed, the junction position cannot be changed by optimization algorithms.
+    pub fn set_position_fixed(&mut self, fixed: bool) {
+        self.position_fixed = fixed;
+    }
+
+    /// Returns the recommended position for this junction
+    ///
+    /// After routing and optimization, this may contain a suggested position
+    /// that would improve the overall layout. Returns None if no recommendation
+    /// has been computed.
+    pub fn recommended_position(&self) -> Option<Point> {
+        self.recommended_position
+    }
+
+    /// Sets the recommended position for this junction
+    ///
+    /// Called by the router during optimization to suggest an improved position.
+    pub fn set_recommended_position(&mut self, position: Option<Point>) {
+        self.recommended_position = position;
+    }
+
+    /// Checks if this junction can have its connectors merged
+    ///
+    /// A junction can be removed and its connectors merged when exactly two
+    /// connectors are attached.
+    pub fn can_merge_connectors(&self) -> bool {
+        self.attached_connectors.len() == 2
+    }
+
+    /// Returns the IDs of attached connectors for merging
+    ///
+    /// Returns Some((id1, id2)) if exactly two connectors attached, None otherwise.
+    pub fn get_connectors_for_merge(&self) -> Option<(u32, u32)> {
+        if self.attached_connectors.len() != 2 {
+            return None;
+        }
+
+        let ids: Vec<_> = self.attached_connectors.iter().copied().collect();
+        Some((ids[0], ids[1]))
     }
 }
 

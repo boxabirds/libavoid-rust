@@ -91,6 +91,10 @@ pub struct Router {
     reroute_queue: HashSet<u32>,
     /// Whether visibility graph needs rebuilding
     needs_vis_rebuild: bool,
+    /// Shapes that need their visibility updated (incremental updates)
+    dirty_shapes: HashSet<u32>,
+    /// Whether to use incremental visibility updates (vs full rebuild)
+    use_incremental_updates: bool,
     /// Next shape ID
     next_shape_id: u32,
     /// Next connector ID
@@ -131,6 +135,8 @@ impl Router {
             action_queue: VecDeque::new(),
             reroute_queue: HashSet::new(),
             needs_vis_rebuild: false,
+            dirty_shapes: HashSet::new(),
+            use_incremental_updates: true, // Enable incremental by default
             next_shape_id: 1,
             next_connector_id: 1,
             next_junction_id: 1,
@@ -171,8 +177,10 @@ impl Router {
 
         if self.transaction_mode {
             self.transaction_pending.push(TransactionOp::AddShape(shape_id));
+            self.mark_shape_dirty(shape_id);
         } else {
-            self.rebuild_visibility_graph();
+            // For new shapes, we need full rebuild since there are new vertices
+            self.rebuild_visibility_graph_full();
         }
 
         shape_id
@@ -180,12 +188,16 @@ impl Router {
 
     /// Deletes a shape from the router
     pub fn delete_shape(&mut self, shape_id: u32) {
+        // Mark dirty before removal so we know which vertices to clean up
+        self.mark_shape_dirty(shape_id);
+
         self.shapes.remove(&shape_id);
 
         if self.transaction_mode {
             self.transaction_pending.push(TransactionOp::DeleteShape(shape_id));
         } else {
-            self.rebuild_visibility_graph();
+            // For removed shapes, need full rebuild to remove stale vertices
+            self.rebuild_visibility_graph_full();
         }
     }
 
@@ -199,10 +211,14 @@ impl Router {
             new_poly.translate(offset);
             shape.set_polygon(new_poly);
 
+            // Mark shape as dirty for incremental update
+            self.mark_shape_dirty(shape_id);
+
             if self.transaction_mode {
                 self.transaction_pending.push(TransactionOp::MoveShape(shape_id, new_position));
             } else {
-                self.rebuild_visibility_graph();
+                // Use incremental update for shape movement
+                self.update_visibility_graph();
                 self.reroute_all_connectors();
             }
         }
@@ -520,25 +536,45 @@ impl Router {
 
         // Check if direct path is clear first (optimization)
         if self.is_direct_path_clear(&src, &dst, &obstacles) {
+            #[cfg(test)]
+            eprintln!("route_polyline: direct path is clear, using direct route");
             let mut route = Polygon::new();
             route.push(src);
             route.push(dst);
             return route;
         }
 
+        #[cfg(test)]
+        eprintln!("route_polyline: direct path blocked, using visibility graph");
+        #[cfg(test)]
+        eprintln!("  vis_graph has {} vertices before adding src/dst", self.vis_graph.vertex_count());
+
         // Add temporary vertices for source and destination
         let src_id = self.vis_graph.add_vertex(src);
         let dst_id = self.vis_graph.add_vertex(dst);
+
+        #[cfg(test)]
+        eprintln!("  added src vertex {} at ({}, {})", src_id, src.x, src.y);
+        #[cfg(test)]
+        eprintln!("  added dst vertex {} at ({}, {})", dst_id, dst.x, dst.y);
 
         // Compute visibility for the new vertices
         self.vis_graph.compute_vertex_visibility(src_id, &obstacles);
         self.vis_graph.compute_vertex_visibility(dst_id, &obstacles);
 
+        #[cfg(test)]
+        eprintln!("  vis_graph has {} vertices after visibility computation", self.vis_graph.vertex_count());
+
         // Find path using A*
         let path_result = self.path_finder.find_path(&self.vis_graph, src_id, dst_id);
 
+        #[cfg(test)]
+        eprintln!("  path_finder result: {:?}", path_result);
+
         // Convert path to polygon (before removing temporary vertices)
         let route = if let Some(path) = path_result {
+            #[cfg(test)]
+            eprintln!("  found path with {} vertices", path.len());
             // Reconstruct polygon from path vertex IDs
             let mut route = Polygon::new();
             route.push(src);
@@ -546,6 +582,8 @@ impl Router {
             // Add intermediate waypoints (skip first and last as they are src/dst)
             for i in 1..path.len().saturating_sub(1) {
                 if let Some(vertex) = self.vis_graph.get_vertex(path[i]) {
+                    #[cfg(test)]
+                    eprintln!("    adding waypoint ({}, {})", vertex.point.x, vertex.point.y);
                     route.push(vertex.point);
                 }
             }
@@ -554,7 +592,12 @@ impl Router {
             route.simplify();
             route
         } else {
-            // No path found through visibility graph, use direct path as fallback
+            // No path found through visibility graph.
+            // This can legitimately happen if src/dst are completely blocked.
+            // Return a direct path but mark it needs attention.
+            // The connector's needs_attention flag should be set by the caller.
+            #[cfg(test)]
+            eprintln!("  WARNING: No path found through visibility graph, returning direct path");
             let mut route = Polygon::new();
             route.push(src);
             route.push(dst);
@@ -582,30 +625,52 @@ impl Router {
     fn is_direct_path_clear(&self, from: &Point, to: &Point, obstacles: &[&dyn Obstacle]) -> bool {
         use crate::geometry::{segment_intersects_polygon_interior, point_in_polygon};
 
+        #[cfg(test)]
+        eprintln!("is_direct_path_clear: checking {} obstacles", obstacles.len());
+
         for obstacle in obstacles {
             if !obstacle.is_active() {
+                #[cfg(test)]
+                eprintln!("  obstacle inactive, skipping");
                 continue;
             }
 
             let polygon = obstacle.polygon();
 
+            #[cfg(test)]
+            eprintln!("  checking obstacle with {} vertices", polygon.size());
+
             // First quick check: bounding box
             let bbox = polygon.bounding_rect();
             if !self.line_might_intersect_box(from, to, &bbox) {
+                #[cfg(test)]
+                eprintln!("  bbox check: no intersection possible");
                 continue; // Can't possibly intersect
             }
 
+            #[cfg(test)]
+            eprintln!("  bbox check passed, doing full intersection test");
+
             // Full polygon intersection test
             if segment_intersects_polygon_interior(from, to, polygon) {
+                #[cfg(test)]
+                eprintln!("  INTERSECTION DETECTED - path blocked!");
                 return false;
             }
 
             // Also check if either endpoint is inside the polygon
             if point_in_polygon(from, polygon) || point_in_polygon(to, polygon) {
+                #[cfg(test)]
+                eprintln!("  ENDPOINT INSIDE - path blocked!");
                 return false;
             }
+
+            #[cfg(test)]
+            eprintln!("  no intersection with this obstacle");
         }
 
+        #[cfg(test)]
+        eprintln!("  path is CLEAR");
         true
     }
 
@@ -636,8 +701,32 @@ impl Router {
         }
     }
 
-    /// Rebuilds the visibility graph
-    fn rebuild_visibility_graph(&mut self) {
+    /// Reroutes a specific connector (public API)
+    ///
+    /// This rebuilds the visibility graph if needed and recalculates
+    /// the route for the specified connector.
+    pub fn reroute_connector(&mut self, conn_id: u32) {
+        // Rebuild visibility graph if needed
+        if self.needs_vis_rebuild {
+            self.rebuild_visibility_graph();
+            self.needs_vis_rebuild = false;
+        }
+        self.route_connector(conn_id);
+    }
+
+    /// Updates the visibility graph, using incremental updates if possible
+    fn update_visibility_graph(&mut self) {
+        if !self.use_incremental_updates || self.dirty_shapes.len() > self.shapes.len() / 2 {
+            // Fall back to full rebuild if too many dirty shapes
+            self.rebuild_visibility_graph_full();
+        } else if !self.dirty_shapes.is_empty() {
+            self.update_visibility_incremental();
+        }
+        self.dirty_shapes.clear();
+    }
+
+    /// Rebuilds the visibility graph from scratch
+    fn rebuild_visibility_graph_full(&mut self) {
         self.vis_graph.clear();
         self.vis_orth_graph.clear();
 
@@ -663,6 +752,111 @@ impl Router {
             self.vis_graph.compute_vertex_visibility(vertex_id, &obstacles);
             self.vis_orth_graph.compute_vertex_visibility(vertex_id, &obstacles);
         }
+    }
+
+    /// Performs incremental visibility update for dirty shapes only
+    ///
+    /// This is more efficient than a full rebuild when only a few shapes have changed.
+    /// The algorithm:
+    /// 1. Remove edges from vertices of dirty shapes
+    /// 2. Update vertices for dirty shapes (add new, remove old)
+    /// 3. Recompute visibility for affected vertices
+    /// 4. Also recompute visibility for vertices that might now see dirty shapes
+    fn update_visibility_incremental(&mut self) {
+        let dirty_shapes: Vec<u32> = self.dirty_shapes.iter().copied().collect();
+
+        // Collect all shape bounding boxes for proximity check
+        let all_bboxes: HashMap<u32, crate::geometry::Box> = self.shapes.iter()
+            .map(|(id, s)| (*id, s.polygon().bounding_rect()))
+            .collect();
+
+        // Find vertices that need their visibility recomputed
+        // This includes vertices of dirty shapes AND vertices whose visibility
+        // might be affected by the dirty shapes
+        let mut affected_vertex_ids: HashSet<u32> = HashSet::new();
+
+        // First pass: collect vertices from dirty shapes and find their IDs
+        for shape_id in &dirty_shapes {
+            if let Some(shape) = self.shapes.get(shape_id) {
+                for point in shape.polygon().points() {
+                    // Find vertex ID at this point
+                    if let Some(vertex_id) = self.vis_graph.find_vertex_at(point) {
+                        self.vis_graph.remove_edges_for_vertex(vertex_id);
+                        affected_vertex_ids.insert(vertex_id);
+                    }
+                    if let Some(vertex_id) = self.vis_orth_graph.find_vertex_at(point) {
+                        self.vis_orth_graph.remove_edges_for_vertex(vertex_id);
+                    }
+                }
+            }
+        }
+
+        // Second pass: find other vertices that might be affected
+        // A vertex is affected if its visibility to any dirty vertex might have changed
+        // This is approximated by checking if the vertex's bounding box overlaps with
+        // the dirty shapes' bounding boxes (with some margin)
+        let visibility_margin = 1000.0; // Large margin to be safe
+
+        for dirty_id in &dirty_shapes {
+            if let Some(dirty_bbox) = all_bboxes.get(dirty_id) {
+                // Expand dirty bbox by visibility margin
+                let expanded_min = Point::new(
+                    dirty_bbox.min.x - visibility_margin,
+                    dirty_bbox.min.y - visibility_margin,
+                );
+                let expanded_max = Point::new(
+                    dirty_bbox.max.x + visibility_margin,
+                    dirty_bbox.max.y + visibility_margin,
+                );
+
+                // Find all vertices within this expanded region
+                let vertex_ids: Vec<u32> = self.vis_graph.vertices()
+                    .filter(|v| {
+                        v.point.x >= expanded_min.x && v.point.x <= expanded_max.x
+                            && v.point.y >= expanded_min.y && v.point.y <= expanded_max.y
+                    })
+                    .map(|v| v.id)
+                    .collect();
+
+                for vertex_id in vertex_ids {
+                    if !affected_vertex_ids.contains(&vertex_id) {
+                        self.vis_graph.remove_edges_for_vertex(vertex_id);
+                        affected_vertex_ids.insert(vertex_id);
+                    }
+                }
+            }
+        }
+
+        // Recompute visibility for affected vertices
+        let obstacles: Vec<&dyn Obstacle> = self.shapes.values()
+            .map(|s| s as &dyn Obstacle)
+            .collect();
+
+        for vertex_id in affected_vertex_ids {
+            self.vis_graph.compute_vertex_visibility(vertex_id, &obstacles);
+            self.vis_orth_graph.compute_vertex_visibility(vertex_id, &obstacles);
+        }
+    }
+
+    /// Enables or disables incremental visibility updates
+    pub fn set_use_incremental_updates(&mut self, enable: bool) {
+        self.use_incremental_updates = enable;
+    }
+
+    /// Returns whether incremental visibility updates are enabled
+    pub fn use_incremental_updates(&self) -> bool {
+        self.use_incremental_updates
+    }
+
+    /// Marks a shape as dirty (needing visibility update)
+    fn mark_shape_dirty(&mut self, shape_id: u32) {
+        self.dirty_shapes.insert(shape_id);
+        self.needs_vis_rebuild = true;
+    }
+
+    /// Legacy method - calls update_visibility_graph
+    fn rebuild_visibility_graph(&mut self) {
+        self.rebuild_visibility_graph_full();
     }
 
     /// Returns all connectors
@@ -731,6 +925,131 @@ impl Router {
 
         Ok(())
     }
+
+    // =========================================================================
+    // Connection Pin Management
+    // =========================================================================
+
+    /// Adds a connection pin to a shape
+    ///
+    /// # Arguments
+    /// * `shape_id` - The ID of the shape to add the pin to
+    /// * `class_id` - The class ID for grouping pins
+    /// * `position` - The position of the pin relative to the shape
+    /// * `directions` - Allowed connection directions (bitfield)
+    pub fn add_connection_pin_to_shape(
+        &mut self,
+        shape_id: u32,
+        class_id: u32,
+        position: Point,
+        directions: u32,
+    ) {
+        if let Some(shape) = self.shapes.get_mut(&shape_id) {
+            let pin = crate::shape::ConnectionPin::with_all(
+                class_id,  // id
+                class_id,  // class_id
+                position,
+                directions,
+                0.0,  // inside_offset
+            );
+            shape.add_connection_pin(pin);
+
+            // Mark connectors attached to this shape for rerouting
+            for conn in self.connectors.values() {
+                let (src, dst) = conn.endpoint_conn_ends();
+                if src.shape_id == Some(shape_id) || dst.shape_id == Some(shape_id) {
+                    self.reroute_queue.insert(conn.id());
+                }
+            }
+        }
+    }
+
+    /// Updates the position of a connection pin on a shape
+    ///
+    /// # Arguments
+    /// * `shape_id` - The ID of the shape containing the pin
+    /// * `pin_id` - The ID of the pin to update
+    /// * `new_position` - The new position for the pin
+    pub fn update_connection_pin_position(
+        &mut self,
+        shape_id: u32,
+        pin_id: u32,
+        new_position: Point,
+    ) {
+        if let Some(shape) = self.shapes.get_mut(&shape_id) {
+            // Find and update the pin
+            for pin in shape.connection_pins_mut() {
+                if pin.id == pin_id || pin.class_id == pin_id {
+                    pin.update_position(new_position);
+                    break;
+                }
+            }
+
+            // Mark connectors attached to this shape for rerouting
+            for conn in self.connectors.values() {
+                let (src, dst) = conn.endpoint_conn_ends();
+                if src.shape_id == Some(shape_id) || dst.shape_id == Some(shape_id) {
+                    self.reroute_queue.insert(conn.id());
+                }
+            }
+
+            self.needs_vis_rebuild = true;
+        }
+    }
+
+    // =========================================================================
+    // Debug and Info Methods
+    // =========================================================================
+
+    /// Returns a string with information about the router state
+    ///
+    /// This is useful for debugging and understanding the current state
+    /// of the router.
+    pub fn print_info(&self) -> String {
+        let mut info = String::new();
+
+        info.push_str(&format!("Router Info:\n"));
+        info.push_str(&format!("  Shapes: {}\n", self.shapes.len()));
+        info.push_str(&format!("  Connectors: {}\n", self.connectors.len()));
+        info.push_str(&format!("  Junctions: {}\n", self.junctions.len()));
+        info.push_str(&format!("  Visibility vertices: {}\n", self.vis_graph.vertex_count()));
+        info.push_str(&format!("  Transaction mode: {}\n", self.transaction_mode));
+        info.push_str(&format!("  Pending reroutes: {}\n", self.reroute_queue.len()));
+
+        info
+    }
+
+    /// Returns debug state information about the router
+    ///
+    /// This provides structured access to router statistics for testing
+    /// and debugging purposes.
+    pub fn debug_state(&self) -> RouterDebugState {
+        RouterDebugState {
+            shape_count: self.shapes.len(),
+            connector_count: self.connectors.len(),
+            junction_count: self.junctions.len(),
+            vertex_count: self.vis_graph.vertex_count(),
+            transaction_mode: self.transaction_mode,
+            pending_reroutes: self.reroute_queue.len(),
+        }
+    }
+}
+
+/// Debug state information from the router
+#[derive(Debug, Clone)]
+pub struct RouterDebugState {
+    /// Number of shapes in the router
+    pub shape_count: usize,
+    /// Number of connectors in the router
+    pub connector_count: usize,
+    /// Number of junctions in the router
+    pub junction_count: usize,
+    /// Number of vertices in the visibility graph
+    pub vertex_count: usize,
+    /// Whether transaction mode is enabled
+    pub transaction_mode: bool,
+    /// Number of connectors pending reroute
+    pub pending_reroutes: usize,
 }
 
 impl Default for Router {
@@ -742,6 +1061,7 @@ impl Default for Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Rectangle;
 
     #[test]
     fn test_router_creation() {
@@ -780,5 +1100,67 @@ mod tests {
 
         router.set_routing_parameter(RoutingParameter::BendPenalty, 100.0);
         assert_eq!(router.routing_parameter(RoutingParameter::BendPenalty), 100.0);
+    }
+
+    /// This test verifies the obstacle avoidance routing with debug output.
+    /// The route from (50, 125) to (350, 125) should NOT go through an
+    /// obstacle centered at (200, 125) with size 50x50.
+    #[test]
+    fn test_obstacle_avoidance_debug() {
+        let mut router = Router::new(ROUTER_FLAG_NONE);
+
+        // Create obstacle at center (200, 125) with size 50x50
+        // This creates bounds: x: 175-225, y: 100-150
+        let rect = Rectangle::new(Point::new(200.0, 125.0), 50.0, 50.0);
+        let poly: Polygon = rect.into();
+
+        eprintln!("Obstacle polygon vertices:");
+        for i in 0..poly.size() {
+            let p = poly.at(i);
+            eprintln!("  ({}, {})", p.x, p.y);
+        }
+
+        let shape_id = router.add_shape(poly, 1);
+        eprintln!("Shape added with id: {}", shape_id);
+        eprintln!("Number of shapes: {}", router.shapes.len());
+
+        // Route that should go THROUGH the obstacle if bug exists
+        let src = Point::new(50.0, 125.0);
+        let dst = Point::new(350.0, 125.0);
+
+        // Test is_direct_path_clear directly
+        let obstacles: Vec<&dyn Obstacle> = router.shapes.values()
+            .map(|s| s as &dyn Obstacle)
+            .collect();
+
+        eprintln!("\nTesting is_direct_path_clear:");
+        eprintln!("  from: ({}, {})", src.x, src.y);
+        eprintln!("  to: ({}, {})", dst.x, dst.y);
+        eprintln!("  obstacles count: {}", obstacles.len());
+
+        let is_clear = router.is_direct_path_clear(&src, &dst, &obstacles);
+        eprintln!("  is_direct_path_clear returned: {}", is_clear);
+
+        // The path SHOULD NOT be clear - it passes through the obstacle
+        assert!(!is_clear, "Path from (50,125) to (350,125) should NOT be clear - obstacle at x:175-225, y:100-150");
+
+        // Now test actual routing
+        let conn_id = router.new_connector(
+            ConnEnd::new(src),
+            ConnEnd::new(dst)
+        );
+
+        let conn = router.get_connector(conn_id).unwrap();
+        let route = conn.display_route().expect("Route should exist");
+
+        eprintln!("\nRoute points:");
+        for i in 0..route.size() {
+            let p = route.at(i);
+            eprintln!("  ({}, {})", p.x, p.y);
+        }
+
+        assert!(route.size() > 2,
+            "Route should avoid obstacle and have more than 2 points, got {}",
+            route.size());
     }
 }

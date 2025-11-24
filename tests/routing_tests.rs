@@ -1,14 +1,15 @@
-use libavoid::{Router, Point, Rectangle, ConnEnd, ConnType, PolygonInterface};
+use libavoid::{Router, Point, Rectangle, ConnEnd, ConnType, PolygonInterface, Polygon};
 
 #[test]
 fn test_polyline_routes_around_obstacle() {
     let mut router = Router::new(0);
 
-    // Add an obstacle in the middle
+    // Add an obstacle centered at (50, 50) with size 40x40
+    // Bounds: x: 30-70, y: 30-70
     let rect = Rectangle::new(Point::new(50.0, 50.0), 40.0, 40.0);
     router.add_shape(rect.into(), 1);
 
-    // Create a connector that would go through the obstacle
+    // Create a connector that would go through the obstacle center at y=50
     let src = ConnEnd::new(Point::new(0.0, 50.0));
     let dst = ConnEnd::new(Point::new(100.0, 50.0));
     let conn_id = router.new_connector(src, dst);
@@ -17,12 +18,12 @@ fn test_polyline_routes_around_obstacle() {
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().expect("Route should exist");
 
-    // The route should have more than 2 points (it should go around the obstacle)
-    assert!(route.size() >= 2, "Route should exist with at least 2 points");
+    // The route MUST have more than 2 points - direct path goes through obstacle
+    assert!(route.size() > 2,
+        "Route should avoid obstacle! Direct path goes through obstacle at x:30-70, y:30-70. Got {} points",
+        route.size());
 
-    // Verify the route doesn't pass through the obstacle center
-    let has_waypoint = route.size() > 2;
-    println!("Route has {} points (waypoint: {})", route.size(), has_waypoint);
+    println!("Route has {} points", route.size());
 }
 
 #[test]
@@ -175,4 +176,136 @@ fn test_polygon_offsetting() {
         offset_bbox.height(),
         orig_bbox.height()
     );
+}
+
+#[test]
+fn test_route_avoids_obstacle_horizontal_line() {
+    // This mirrors the gallery.js basic example exactly
+    let mut router = Router::new(0);
+
+    // Create obstacle: top-left (175, 100), width 50, height 50
+    // Using Rectangle::new which takes CENTER point
+    let center_x = 175.0 + 50.0 / 2.0; // = 200
+    let center_y = 100.0 + 50.0 / 2.0; // = 125
+    let rect = Rectangle::new(Point::new(center_x, center_y), 50.0, 50.0);
+    
+    println!("Rectangle center: ({}, {})", center_x, center_y);
+    let poly: Polygon = rect.into();
+    println!("Polygon points:");
+    for i in 0..poly.size() {
+        let p = poly.at(i);
+        println!("  ({}, {})", p.x, p.y);
+    }
+    
+    router.add_shape(poly, 1);
+
+    // Route from left to right at y=125 (same as obstacle center y)
+    let src = ConnEnd::new(Point::new(50.0, 125.0));
+    let dst = ConnEnd::new(Point::new(350.0, 125.0));
+    let conn_id = router.new_connector(src, dst);
+
+    let conn = router.get_connector(conn_id).unwrap();
+    let route = conn.display_route().expect("Route should exist");
+
+    println!("Route points:");
+    for i in 0..route.size() {
+        let p = route.at(i);
+        println!("  ({}, {})", p.x, p.y);
+    }
+
+    // The route MUST have more than 2 points because a direct line
+    // from (50, 125) to (350, 125) passes through the obstacle
+    // which spans x: 175-225, y: 100-150
+    assert!(
+        route.size() > 2,
+        "Route should avoid obstacle! Got {} points (direct line). \
+         Obstacle is at x:175-225, y:100-150. Route y=125 passes through it.",
+        route.size()
+    );
+}
+
+#[test]
+fn test_geometry_intersection_detection() {
+    use libavoid::geometry::{point_in_polygon, segment_intersects_polygon_interior};
+    
+    // Create the exact same obstacle polygon
+    let mut poly = Polygon::new();
+    poly.push(Point::new(175.0, 100.0));
+    poly.push(Point::new(225.0, 100.0));
+    poly.push(Point::new(225.0, 150.0));
+    poly.push(Point::new(175.0, 150.0));
+    
+    // Test points
+    let src = Point::new(50.0, 125.0);
+    let dst = Point::new(350.0, 125.0);
+    let mid = Point::new(200.0, 125.0);  // Midpoint of route
+    
+    println!("Testing point_in_polygon:");
+    println!("  src (50, 125) in polygon: {}", point_in_polygon(&src, &poly));
+    println!("  dst (350, 125) in polygon: {}", point_in_polygon(&dst, &poly));
+    println!("  mid (200, 125) in polygon: {}", point_in_polygon(&mid, &poly));
+    
+    // Midpoint (200, 125) should be inside because:
+    // x: 175 < 200 < 225 ✓
+    // y: 100 < 125 < 150 ✓
+    assert!(point_in_polygon(&mid, &poly), 
+        "Midpoint (200, 125) should be inside polygon (175-225, 100-150)");
+    
+    println!("\nTesting segment_intersects_polygon_interior:");
+    let intersects = segment_intersects_polygon_interior(&src, &dst, &poly);
+    println!("  segment (50,125)-(350,125) intersects: {}", intersects);
+    
+    assert!(intersects,
+        "Segment from (50,125) to (350,125) should intersect polygon at x:175-225, y:100-150");
+}
+
+#[test]
+fn test_debug_router_obstacle_detection() {
+    use libavoid::geometry::{segment_intersects_polygon_interior};
+    use libavoid::Obstacle;
+    
+    let mut router = Router::new(0);
+
+    // Add obstacle
+    let rect = Rectangle::new(Point::new(200.0, 125.0), 50.0, 50.0);
+    let shape_id = router.add_shape(rect.into(), 1);
+    
+    println!("Shape added with id: {}", shape_id);
+    println!("Number of shapes in router: {}", router.shapes().count());
+    
+    // Check the shape is there and active
+    if let Some(shape) = router.get_shape(shape_id) {
+        println!("Shape found, is_active: {}", shape.is_active());
+        let poly = shape.polygon();
+        println!("Shape polygon points:");
+        for i in 0..poly.size() {
+            let p = poly.at(i);
+            println!("  ({}, {})", p.x, p.y);
+        }
+        
+        // Test intersection directly with the shape's polygon
+        let src = Point::new(50.0, 125.0);
+        let dst = Point::new(350.0, 125.0);
+        let intersects = segment_intersects_polygon_interior(&src, &dst, poly);
+        println!("\nDirect intersection test: {}", intersects);
+    } else {
+        println!("ERROR: Shape not found!");
+    }
+
+    // Now add connector and check route
+    let conn_id = router.new_connector(
+        ConnEnd::new(Point::new(50.0, 125.0)),
+        ConnEnd::new(Point::new(350.0, 125.0))
+    );
+    
+    let conn = router.get_connector(conn_id).unwrap();
+    let route = conn.display_route().expect("Route should exist");
+    
+    println!("\nRoute points after routing:");
+    for i in 0..route.size() {
+        let p = route.at(i);
+        println!("  ({}, {})", p.x, p.y);
+    }
+    
+    assert!(route.size() > 2, "Route should avoid obstacle, got {} points", route.size());
 }

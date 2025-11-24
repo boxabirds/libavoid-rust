@@ -655,9 +655,16 @@ impl Router {
         true
     }
 
+    /// Move shape by offset from current position
+    /// x_diff, y_diff are offsets (deltas) from current position, matching libavoid-js semantics
     #[wasm_bindgen(js_name = moveShape)]
-    pub fn move_shape(&mut self, shape: &ShapeRef, x: f64, y: f64) {
-        self.inner.move_shape(shape.id(), RustPoint::new(x, y));
+    pub fn move_shape(&mut self, shape: &ShapeRef, x_diff: f64, y_diff: f64) {
+        // libavoid-js semantics: x_diff/y_diff are offsets from current position
+        if let Some(router_shape) = self.inner.get_shape(shape.id()) {
+            let current = router_shape.position();
+            let new_pos = RustPoint::new(current.x + x_diff, current.y + y_diff);
+            self.inner.move_shape(shape.id(), new_pos);
+        }
     }
 
     /// Move shape to a new polygon position
@@ -907,6 +914,14 @@ impl Rectangle {
     #[wasm_bindgen]
     pub fn center(&self) -> Point {
         Point { inner: self.inner.center() }
+    }
+
+    /// Convert rectangle to a polygon (for use with ShapeRef)
+    #[wasm_bindgen(js_name = toPolygon)]
+    pub fn to_polygon(&self) -> Polygon {
+        Polygon {
+            inner: self.inner.clone().into(),
+        }
     }
 }
 

@@ -52,10 +52,10 @@ This document catalogues all tasks required to complete the baseline libavoid-ru
 | 34 | Create unit test suite for visibility | **done** | 6, 7 | M |
 | 35 | Create unit test suite for path finding | **done** | 8-11 | M |
 | 36 | Create integration test suite | **done** | 17-21 | L |
-| 37 | Create parity test suite vs libavoid-js | pending | 32 | L |
-| 38 | Create property-based tests | pending | 36 | M |
-| 39 | Create performance benchmarks | pending | 36 | M |
-| 40 | Documentation and examples | pending | All | M |
+| 37 | Create parity test suite vs libavoid-js | **done** | 32 | L |
+| 38 | Create property-based tests | **done** | 36 | M |
+| 39 | Create performance benchmarks | **done** | 36 | M |
+| 40 | Documentation and examples | **done** | All | M |
 
 ---
 

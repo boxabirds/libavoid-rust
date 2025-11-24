@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>libavoid-rust Examples Gallery</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f8f9fa;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+    }
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+      gap: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .example-card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .example-header {
+      padding: 15px 20px;
+      background: #2563eb;
+      color: white;
+    }
+    .example-header h2 {
+      margin: 0 0 5px 0;
+      font-size: 1.1em;
+    }
+    .example-header p {
+      margin: 0;
+      font-size: 0.85em;
+      opacity: 0.9;
+    }
+    .example-content {
+      padding: 15px;
+    }
+    .canvas-container {
+      background: #fafafa;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .canvas-container svg {
+      display: block;
+      width: 100%;
+      height: 250px;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .controls button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+    .controls button:hover {
+      background: #1d4ed8;
+    }
+    .controls button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+    .output {
+      font-family: monospace;
+      font-size: 0.8em;
+      background: #1f2937;
+      color: #10b981;
+      padding: 10px;
+      border-radius: 4px;
+      max-height: 120px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .legend {
+      display: flex;
+      gap: 15px;
+      font-size: 0.8em;
+      color: #666;
+      margin-top: 8px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend-color {
+      width: 20px;
+      height: 3px;
+      border-radius: 2px;
+    }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+    /* Category badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7em;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+    .badge-basic { background: #dbeafe; color: #1e40af; }
+    .badge-advanced { background: #fef3c7; color: #92400e; }
+    .badge-interactive { background: #d1fae5; color: #065f46; }
+  </style>
+</head>
+<body>
+  <h1>libavoid-rust Examples Gallery</h1>
+  <p class="subtitle">MECE demonstration of connector routing capabilities</p>
+
+  <div id="loading" class="loading">Loading WASM module...</div>
+
+  <div id="gallery" class="gallery" style="display: none;">
+
+    <!-- 1. Basic Polyline Routing -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>1. Basic Polyline Routing <span class="badge badge-basic">Basic</span></h2>
+        <p>Simple point-to-point routing around a single obstacle</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-basic" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.basic.run()">Run Example</button>
+          <button onclick="examples.basic.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-basic">Click "Run Example" to start</div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-color" style="background:#ef4444"></div> Obstacle</div>
+          <div class="legend-item"><div class="legend-color" style="background:#3b82f6"></div> Route</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Orthogonal Routing -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>2. Orthogonal Routing <span class="badge badge-basic">Basic</span></h2>
+        <p>Routes using only horizontal and vertical segments</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-orthogonal" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.orthogonal.run()">Run Example</button>
+          <button onclick="examples.orthogonal.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-orthogonal">Click "Run Example" to start</div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-color" style="background:#ef4444"></div> Obstacle</div>
+          <div class="legend-item"><div class="legend-color" style="background:#8b5cf6"></div> Orthogonal Route</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Multiple Obstacles -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>3. Multiple Obstacles <span class="badge badge-advanced">Advanced</span></h2>
+        <p>Navigating complex layouts with many obstacles</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-multi" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.multi.run()">Run Example</button>
+          <button onclick="examples.multi.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-multi">Click "Run Example" to start</div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-color" style="background:#ef4444"></div> Obstacles</div>
+          <div class="legend-item"><div class="legend-color" style="background:#10b981"></div> Route</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Shape Operations -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>4. Shape Operations <span class="badge badge-advanced">Advanced</span></h2>
+        <p>Add, move, and remove shapes dynamically</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-shapes" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.shapes.run()">Run Sequence</button>
+          <button onclick="examples.shapes.addShape()">Add Shape</button>
+          <button onclick="examples.shapes.moveShape()">Move Shape</button>
+          <button onclick="examples.shapes.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-shapes">Click "Run Sequence" to start</div>
+      </div>
+    </div>
+
+    <!-- 5. Transaction Batching -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>5. Transaction Batching <span class="badge badge-advanced">Advanced</span></h2>
+        <p>Efficient bulk updates with batched processing</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-batch" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.batch.runBatch()">Run Batched</button>
+          <button onclick="examples.batch.runImmediate()">Run Immediate</button>
+          <button onclick="examples.batch.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-batch">Compare batched vs immediate routing</div>
+      </div>
+    </div>
+
+    <!-- 6. Multiple Connectors -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>6. Multiple Connectors <span class="badge badge-advanced">Advanced</span></h2>
+        <p>Many connectors routed simultaneously</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-connectors" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.connectors.run()">Run Example</button>
+          <button onclick="examples.connectors.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-connectors">Click "Run Example" to start</div>
+      </div>
+    </div>
+
+    <!-- 7. Crossing Minimization -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>7. Crossing Visualization <span class="badge badge-advanced">Advanced</span></h2>
+        <p>Detecting and visualizing route crossings</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-crossing" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.crossing.run()">Run Example</button>
+          <button onclick="examples.crossing.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-crossing">Click "Run Example" to start</div>
+      </div>
+    </div>
+
+    <!-- 8. Interactive Demo -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>8. Interactive Demo <span class="badge badge-interactive">Interactive</span></h2>
+        <p>Click to add shapes, drag to create connectors</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-interactive" viewBox="0 0 400 250" style="cursor: crosshair;"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.interactive.setMode('shape')">Add Shape Mode</button>
+          <button onclick="examples.interactive.setMode('connector')">Add Connector Mode</button>
+          <button onclick="examples.interactive.reset()">Clear All</button>
+        </div>
+        <div class="output" id="output-interactive">Mode: shape | Click on canvas to add shapes</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script type="module" src="gallery.js"></script>
+</body>
+</html>

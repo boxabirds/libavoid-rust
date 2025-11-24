@@ -834,6 +834,164 @@ pub fn count_connector_crossings(route: &Polygon, other_routes: &[&Polygon]) -> 
     total
 }
 
+// ============================================================================
+// Sweep-line visibility algorithm helpers
+// ============================================================================
+
+/// Returns the rotational angle (0-360 degrees) of a point from the origin.
+/// Used for sweep-line visibility algorithm.
+pub fn rotational_angle(p: &Point) -> f64 {
+    use std::f64::consts::PI;
+
+    if p.y == 0.0 {
+        return if p.x < 0.0 { 180.0 } else { 0.0 };
+    } else if p.x == 0.0 {
+        return if p.y < 0.0 { 270.0 } else { 90.0 };
+    }
+
+    let mut ang = (p.y / p.x).atan();
+    ang = ang * 180.0 / PI;
+
+    if p.x < 0.0 {
+        ang += 180.0;
+    } else if p.y < 0.0 {
+        ang += 360.0;
+    }
+
+    debug_assert!(ang >= 0.0 && ang <= 360.0);
+    ang
+}
+
+/// Direction constant: point is ahead (counter-clockwise) of the line
+pub const VEC_DIR_AHEAD: i32 = 1;
+/// Direction constant: point is behind (clockwise) of the line
+pub const VEC_DIR_BEHIND: i32 = -1;
+/// Direction constant: point is collinear with the line
+pub const VEC_DIR_COLLINEAR: i32 = 0;
+
+/// Returns the direction of point c relative to line ab.
+/// Returns 1 (AHEAD/CCW), -1 (BEHIND/CW), or 0 (collinear).
+/// This is the sign of the 2D cross product (b-a) × (c-a).
+pub fn vec_dir(a: &Point, b: &Point, c: &Point) -> i32 {
+    vec_dir_with_tolerance(a, b, c, 0.0)
+}
+
+/// Returns the direction of point c relative to line ab with tolerance.
+pub fn vec_dir_with_tolerance(a: &Point, b: &Point, c: &Point, tolerance: f64) -> i32 {
+    debug_assert!(tolerance >= 0.0);
+
+    let area2 = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+
+    if area2 < -tolerance {
+        VEC_DIR_BEHIND
+    } else if area2 > tolerance {
+        VEC_DIR_AHEAD
+    } else {
+        VEC_DIR_COLLINEAR
+    }
+}
+
+/// Checks if point c lies on the open segment (a, b), assuming collinearity.
+pub fn in_between(a: &Point, b: &Point, c: &Point) -> bool {
+    if (a.x - b.x).abs() > f64::EPSILON {
+        // Not vertical
+        ((a.x < c.x) && (c.x < b.x)) || ((b.x < c.x) && (c.x < a.x))
+    } else {
+        ((a.y < c.y) && (c.y < b.y)) || ((b.y < c.y) && (c.y < a.y))
+    }
+}
+
+/// Checks if point c lies on the closed segment [a, b].
+pub fn point_on_line(a: &Point, b: &Point, c: &Point) -> bool {
+    // Optimize for orthogonal segments
+    if a.x == b.x {
+        return (a.x == c.x) &&
+            (((a.y < c.y) && (c.y < b.y)) || ((b.y < c.y) && (c.y < a.y)));
+    } else if a.y == b.y {
+        return (a.y == c.y) &&
+            (((a.x < c.x) && (c.x < b.x)) || ((b.x < c.x) && (c.x < a.x)));
+    }
+
+    // General case
+    vec_dir(a, b, c) == VEC_DIR_COLLINEAR && in_between(a, b, c)
+}
+
+/// Result codes for ray intersection
+pub const DO_INTERSECT: i32 = 1;
+pub const DONT_INTERSECT: i32 = 0;
+pub const PARALLEL: i32 = 2;
+
+/// Computes the intersection point of ray from `center` through `ray_point`
+/// with segment from `seg1` to `seg2`.
+/// Returns (result_code, intersection_point).
+pub fn ray_intersect_point(
+    seg1: &Point,
+    seg2: &Point,
+    center: &Point,
+    ray_point: &Point,
+) -> (i32, Point) {
+    let ax = seg2.x - seg1.x;
+    let ay = seg2.y - seg1.y;
+    let bx = center.x - ray_point.x;
+    let by = center.y - ray_point.y;
+    let cx = seg1.x - center.x;
+    let cy = seg1.y - center.y;
+
+    let denom = ay * bx - ax * by;
+
+    if denom.abs() < f64::EPSILON {
+        return (PARALLEL, Point::new(0.0, 0.0));
+    }
+
+    let t = (ax * cy - ay * cx) / denom;
+
+    // The ray extends from center through ray_point indefinitely
+    // t >= 0 means intersection is in the ray direction
+    if t < 0.0 {
+        return (DONT_INTERSECT, Point::new(0.0, 0.0));
+    }
+
+    let s = if ax.abs() > ay.abs() {
+        (bx * t + cx) / ax
+    } else {
+        (by * t + cy) / ay
+    };
+
+    // s must be in [0, 1] for intersection to be on the segment
+    if s < 0.0 || s > 1.0 {
+        return (DONT_INTERSECT, Point::new(0.0, 0.0));
+    }
+
+    let ix = center.x + t * (ray_point.x - center.x);
+    let iy = center.y + t * (ray_point.y - center.y);
+
+    (DO_INTERSECT, Point::new(ix, iy))
+}
+
+/// Checks if point p is in a valid region for shortest paths.
+/// a0, a1, a2 are ordered vertices of a shape (a1 is the corner).
+/// Based on the InCone algorithm from computational geometry.
+pub fn in_valid_region(
+    _ignore_regions: bool,
+    a0: &Point,
+    a1: &Point,
+    a2: &Point,
+    p: &Point,
+) -> bool {
+    // Check if p is in the cone formed by going from a0 to a1 to a2
+    let a1_a0 = vec_dir(a1, a0, p);
+    let a1_a2 = vec_dir(a1, a2, p);
+
+    // If the corner is convex (left turn)
+    if vec_dir(a0, a1, a2) >= 0 {
+        // p must be on left of both edges
+        a1_a0 >= 0 && a1_a2 >= 0
+    } else {
+        // Reflex corner: p must NOT be in the reflex region
+        !(a1_a0 < 0 && a1_a2 < 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

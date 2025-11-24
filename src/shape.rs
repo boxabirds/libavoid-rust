@@ -109,6 +109,14 @@ impl ConnectionPin {
     pub fn connection_cost(&self) -> f64 {
         self.connection_cost
     }
+
+    /// Updates the pin's position
+    ///
+    /// This is typically called when a shape is resized or when
+    /// the pin needs to be repositioned after a transformation.
+    pub fn update_position(&mut self, new_position: Point) {
+        self.position = new_position;
+    }
 }
 
 impl ShapeRef {
@@ -128,6 +136,11 @@ impl ShapeRef {
     /// Returns the connection pins
     pub fn connection_pins(&self) -> &[ConnectionPin] {
         &self.connection_pins
+    }
+
+    /// Returns mutable access to the connection pins
+    pub fn connection_pins_mut(&mut self) -> &mut [ConnectionPin] {
+        &mut self.connection_pins
     }
 
     /// Finds a connection pin by ID

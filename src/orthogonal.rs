@@ -37,6 +37,41 @@ impl Direction {
     pub fn is_vertical(&self) -> bool {
         matches!(self, Direction::North | Direction::South)
     }
+
+    /// Converts to ConnDirFlags bit
+    pub fn to_conn_dir_flag(&self) -> u32 {
+        use crate::connector::{CONN_DIR_UP, CONN_DIR_DOWN, CONN_DIR_LEFT, CONN_DIR_RIGHT};
+        match self {
+            Direction::North => CONN_DIR_UP,
+            Direction::South => CONN_DIR_DOWN,
+            Direction::East => CONN_DIR_RIGHT,
+            Direction::West => CONN_DIR_LEFT,
+        }
+    }
+
+    /// Returns all directions allowed by the given ConnDirFlags
+    pub fn from_conn_dir_flags(flags: u32) -> Vec<Direction> {
+        use crate::connector::{CONN_DIR_UP, CONN_DIR_DOWN, CONN_DIR_LEFT, CONN_DIR_RIGHT};
+        let mut dirs = Vec::new();
+        if flags & CONN_DIR_UP != 0 {
+            dirs.push(Direction::North);
+        }
+        if flags & CONN_DIR_DOWN != 0 {
+            dirs.push(Direction::South);
+        }
+        if flags & CONN_DIR_LEFT != 0 {
+            dirs.push(Direction::West);
+        }
+        if flags & CONN_DIR_RIGHT != 0 {
+            dirs.push(Direction::East);
+        }
+        dirs
+    }
+
+    /// Checks if this direction is allowed by the given ConnDirFlags
+    pub fn is_allowed_by(&self, flags: u32) -> bool {
+        flags & self.to_conn_dir_flag() != 0
+    }
 }
 
 /// Orthogonal routing context
@@ -352,12 +387,40 @@ impl OrthogonalAStarRouter {
         goal: Point,
         obstacles: &[&dyn Obstacle],
     ) -> Polygon {
+        use crate::connector::CONN_DIR_ALL;
+        self.route_astar_with_directions(start, goal, obstacles, CONN_DIR_ALL, CONN_DIR_ALL)
+    }
+
+    /// Routes using A* with direction constraints at start and goal
+    ///
+    /// # Arguments
+    /// * `start` - Starting position
+    /// * `goal` - Goal position
+    /// * `obstacles` - Obstacles to route around
+    /// * `src_directions` - Allowed departure directions from start (ConnDirFlags)
+    /// * `dst_directions` - Allowed arrival directions at goal (ConnDirFlags)
+    pub fn route_astar_with_directions(
+        &self,
+        start: Point,
+        goal: Point,
+        obstacles: &[&dyn Obstacle],
+        src_directions: u32,
+        dst_directions: u32,
+    ) -> Polygon {
+        use crate::connector::CONN_DIR_ALL;
+
         let mut open_set = BinaryHeap::new();
         let mut came_from: HashMap<NodeId, (NodeId, Point)> = HashMap::new();
         let mut g_score: HashMap<NodeId, f64> = HashMap::new();
 
-        // Start with all four directions
-        for dir in [Direction::North, Direction::South, Direction::East, Direction::West] {
+        // Start with directions allowed by src_directions
+        let start_dirs = if src_directions == CONN_DIR_ALL {
+            vec![Direction::North, Direction::South, Direction::East, Direction::West]
+        } else {
+            Direction::from_conn_dir_flags(src_directions)
+        };
+
+        for dir in start_dirs {
             let start_node = encode_node(
                 (start.x / GRID_RESOLUTION) as i32,
                 (start.y / GRID_RESOLUTION) as i32,
@@ -374,10 +437,29 @@ impl OrthogonalAStarRouter {
 
         let goal_tolerance = GRID_RESOLUTION * 2.0;
 
+        // Compute allowed arrival directions (opposite of dst_directions)
+        // If dst allows RIGHT, we can arrive going LEFT (approaching from left side)
+        let allowed_arrival_dirs = if dst_directions == CONN_DIR_ALL {
+            vec![Direction::North, Direction::South, Direction::East, Direction::West]
+        } else {
+            Direction::from_conn_dir_flags(dst_directions)
+                .into_iter()
+                .map(|d| d.opposite())
+                .collect()
+        };
+
         while let Some(current) = open_set.pop() {
-            // Check if we reached the goal
+            // Check if we reached the goal with a valid arrival direction
             if current.position.distance(&goal) < goal_tolerance {
-                return self.reconstruct_path(&came_from, current.node_id, start, goal);
+                // Verify arrival direction is allowed
+                if let Some(dir) = current.direction {
+                    if allowed_arrival_dirs.contains(&dir) {
+                        return self.reconstruct_path(&came_from, current.node_id, start, goal);
+                    }
+                } else {
+                    // No direction constraint at goal
+                    return self.reconstruct_path(&came_from, current.node_id, start, goal);
+                }
             }
 
             let current_g = *g_score.get(&current.node_id).unwrap_or(&f64::INFINITY);
@@ -662,6 +744,7 @@ pub fn nudge_routes(routes: &mut [Polygon], nudge_distance: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connector::{CONN_DIR_UP, CONN_DIR_DOWN, CONN_DIR_LEFT, CONN_DIR_RIGHT, CONN_DIR_ALL};
 
     #[test]
     fn test_direction() {
@@ -669,6 +752,51 @@ mod tests {
         assert_eq!(Direction::East.opposite(), Direction::West);
         assert!(Direction::East.is_horizontal());
         assert!(Direction::North.is_vertical());
+    }
+
+    #[test]
+    fn test_direction_to_conn_dir_flag() {
+        assert_eq!(Direction::North.to_conn_dir_flag(), CONN_DIR_UP);
+        assert_eq!(Direction::South.to_conn_dir_flag(), CONN_DIR_DOWN);
+        assert_eq!(Direction::East.to_conn_dir_flag(), CONN_DIR_RIGHT);
+        assert_eq!(Direction::West.to_conn_dir_flag(), CONN_DIR_LEFT);
+    }
+
+    #[test]
+    fn test_direction_from_conn_dir_flags() {
+        let dirs = Direction::from_conn_dir_flags(CONN_DIR_UP | CONN_DIR_RIGHT);
+        assert_eq!(dirs.len(), 2);
+        assert!(dirs.contains(&Direction::North));
+        assert!(dirs.contains(&Direction::East));
+
+        let all_dirs = Direction::from_conn_dir_flags(CONN_DIR_ALL);
+        assert_eq!(all_dirs.len(), 4);
+    }
+
+    #[test]
+    fn test_direction_is_allowed_by() {
+        assert!(Direction::North.is_allowed_by(CONN_DIR_UP));
+        assert!(!Direction::North.is_allowed_by(CONN_DIR_DOWN));
+        assert!(Direction::East.is_allowed_by(CONN_DIR_ALL));
+    }
+
+    #[test]
+    fn test_astar_with_direction_constraints() {
+        let router = OrthogonalAStarRouter::new();
+        let start = Point::new(0.0, 0.0);
+        let goal = Point::new(10.0, 0.0);
+
+        // With no constraints, should route directly
+        let path1 = router.route_astar_with_directions(start, goal, &[], CONN_DIR_ALL, CONN_DIR_ALL);
+        assert!(path1.size() >= 2);
+
+        // With RIGHT-only departure from start
+        let path2 = router.route_astar_with_directions(start, goal, &[], CONN_DIR_RIGHT, CONN_DIR_ALL);
+        assert!(path2.size() >= 2);
+
+        // With LEFT-only arrival at goal (must approach from left side)
+        let path3 = router.route_astar_with_directions(start, goal, &[], CONN_DIR_ALL, CONN_DIR_LEFT);
+        assert!(path3.size() >= 2);
     }
 
     #[test]
