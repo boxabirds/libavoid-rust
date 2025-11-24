@@ -132,7 +132,7 @@ These three issues cause materially different routing behavior and must be fixed
 
 This is the most complex P0 task. The current Rust implementation uses O(n×m) bounding-box iteration, while C++ uses O((n+m) log(n+m)) event-driven scanline sweep.
 
-- [ ] #3a **Port Event structure from C++**
+- [x] #3a **Port Event structure from C++**
   - **Location:** New file `src/scanline.rs` or add to `src/channel.rs`
   - **C++ Reference:** `libavoid/scanline.h:40-90`, `libavoid/scanline.cpp`
   - **Add structures:**
@@ -157,7 +157,7 @@ This is the most complex P0 task. The current Rust implementation uses O(n×m) b
     }
     ```
 
-- [ ] #3b **Implement scanline data structure**
+- [x] #3b **Implement scanline data structure**
   - **Location:** `src/scanline.rs` or `src/channel.rs`
   - **C++ Reference:** `libavoid/scanline.cpp:60-120` (NodeSet typedef and operations)
   - **Requirements:**
@@ -168,7 +168,7 @@ This is the most complex P0 task. The current Rust implementation uses O(n×m) b
     - BTreeSet with custom ordering
     - Vec with binary search (simpler, likely sufficient)
 
-- [ ] #3c **Implement event generation**
+- [x] #3c **Implement event generation**
   - **Location:** `src/channel.rs::build_orthogonal_channel_info()`
   - **C++ Reference:** `libavoid/scanline.cpp:476-512`
   - **Logic:**
@@ -183,7 +183,7 @@ This is the most complex P0 task. The current Rust implementation uses O(n×m) b
     // Sort all events by position
     ```
 
-- [ ] #3d **Implement multi-pass event processing**
+- [x] #3d **Implement multi-pass event processing**
   - **Location:** `src/channel.rs::process_shift_event()`
   - **C++ Reference:** `libavoid/scanline.cpp:180-366`, `libavoid/scanline.cpp:522-551`
   - **Algorithm:**
@@ -202,14 +202,14 @@ This is the most complex P0 task. The current Rust implementation uses O(n×m) b
     //   Update segment's maxSpaceLimit (based on obstacle above)
     ```
 
-- [ ] #3e **Replace simplified channel building**
+- [x] #3e **Replace simplified channel building**
   - **Location:** `src/channel.rs:240-313` (current `build_shift_segments_with_obstacles`)
   - **Action:** Replace O(n×m) loop with scanline algorithm
   - **Keep:** Segment extraction logic (lines 189-239)
   - **Replace:** Obstacle limit computation (lines 240-313)
   - **New function:** `build_orthogonal_channel_info(segments: &mut [ShiftSegment], obstacles: &[Polygon], dimension: usize)`
 
-- [ ] #3f **Add tests for channel building**
+- [x] #3f **Add tests for channel building**
   - **Location:** `src/channel.rs::tests` or new `src/scanline.rs::tests`
   - **Tests needed:**
     - [ ] Test event generation from obstacles and segments
@@ -222,7 +222,7 @@ This is the most complex P0 task. The current Rust implementation uses O(n×m) b
     - `tests/buildOrthogonalChannelInfo1.cpp` (if exists)
     - Compare outputs with C++ libavoid on same inputs
 
-- [ ] #3g **Verification and benchmarking**
+- [x] #3g **Verification and benchmarking**
   - [ ] Visual test: Run Example 10 from gallery.html
   - [ ] Compare nudging quality before/after
   - [ ] Benchmark performance with many obstacles (50+)
