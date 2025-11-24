@@ -76,7 +76,11 @@ struct ScanEvent {
 // Shift Segment
 // ============================================================================
 
+/// Tolerance for position comparisons
+const SEGMENT_POSITION_TOLERANCE: f64 = 10.0;
+
 /// A segment of a route that can be shifted perpendicular to its direction
+/// C++ ref: libavoid/orthogonal.cpp:95-220 - NudgingShiftSegment
 #[derive(Debug, Clone)]
 pub struct ShiftSegment {
     /// Route index
@@ -98,6 +102,7 @@ pub struct ShiftSegment {
     /// Whether this is the only segment in the route (gets stronger weight)
     pub is_single_segment_route: bool,
     /// Whether this segment is connected to a shape (endpoint segment)
+    /// C++ ref: libavoid/orthogonal.cpp:126-130 - endsInShape flag
     pub connected_to_shape: bool,
     /// Whether this segment touches a colinear segment from another route (Task #12)
     pub touches_colinear: bool,
@@ -107,6 +112,15 @@ pub struct ShiftSegment {
     pub variable_idx: Option<usize>,
     /// Current position
     pub position: f64,
+    /// Whether this is a final segment (adjacent to endpoint)
+    /// C++ ref: libavoid/orthogonal.cpp:114 - finalSegment
+    pub final_segment: bool,
+    /// All point indexes in the route that belong to this segment (for merging)
+    /// C++ ref: libavoid/orthogonal.cpp:147 - indexes
+    pub indexes: Vec<usize>,
+    /// Checkpoint positions (for checkpoint handling during alignment)
+    /// C++ ref: libavoid/orthogonal.cpp:152 - checkpoints
+    pub checkpoints: Vec<Point>,
 }
 
 impl ShiftSegment {
@@ -135,6 +149,9 @@ impl ShiftSegment {
             contains_checkpoint: false,  // Will be detected if route has checkpoints (Task #18)
             variable_idx: None,
             position,
+            final_segment: false,  // Will be set during classification
+            indexes: vec![low_idx, high_idx],  // Initial indexes
+            checkpoints: Vec::new(),
         }
     }
 
@@ -161,6 +178,9 @@ impl ShiftSegment {
             contains_checkpoint: false,
             variable_idx: None,
             position,
+            final_segment: false,
+            indexes: vec![low_idx, high_idx],
+            checkpoints: Vec::new(),
         }
     }
 
@@ -232,6 +252,7 @@ impl ShiftSegment {
 
         if is_first || is_last {
             self.segment_type = SegmentType::Final;
+            self.final_segment = true;  // Set flag for segment merging
             return;
         }
 
@@ -289,6 +310,239 @@ impl ShiftSegment {
 
         // Default to regular
         self.segment_type = SegmentType::Regular;
+    }
+
+    /// Get the low point (min in alt dimension) of the segment
+    /// C++ ref: libavoid/orthogonal.cpp lowPoint()
+    pub fn low_point(&self, routes: &[Polygon]) -> Point {
+        let route = &routes[self.route_idx];
+        let p1 = route.at(self.low_idx);
+        let p2 = route.at(self.high_idx);
+        let alt_dim = (self.dimension + 1) % 2;
+
+        if alt_dim == 0 {
+            if p1.x < p2.x { *p1 } else { *p2 }
+        } else {
+            if p1.y < p2.y { *p1 } else { *p2 }
+        }
+    }
+
+    /// Get the high point (max in alt dimension) of the segment
+    /// C++ ref: libavoid/orthogonal.cpp highPoint()
+    pub fn high_point(&self, routes: &[Polygon]) -> Point {
+        let route = &routes[self.route_idx];
+        let p1 = route.at(self.low_idx);
+        let p2 = route.at(self.high_idx);
+        let alt_dim = (self.dimension + 1) % 2;
+
+        if alt_dim == 0 {
+            if p1.x > p2.x { *p1 } else { *p2 }
+        } else {
+            if p1.y > p2.y { *p1 } else { *p2 }
+        }
+    }
+
+    /// Check if this segment can optionally align with another.
+    /// Returns true if same route and neither has checkpoints.
+    /// C++ ref: libavoid/orthogonal.cpp:361-381 - canAlignWith()
+    pub fn can_align_with(&self, other: &ShiftSegment) -> bool {
+        if self.route_idx != other.route_idx {
+            return false;
+        }
+
+        // Don't allow segments of the same connector to drift together
+        // where one of them goes via a checkpoint. We want the path
+        // through the checkpoint to be maintained.
+        let has_checkpoints = !self.checkpoints.is_empty();
+        let other_has_checkpoints = !other.checkpoints.is_empty();
+
+        if has_checkpoints || other_has_checkpoints {
+            return false;
+        }
+
+        true
+    }
+
+    /// Check if this segment should align with another.
+    /// Returns true if segments must be aligned (not optional).
+    /// C++ ref: libavoid/orthogonal.cpp:383-440 - shouldAlignWith()
+    pub fn should_align_with(&self, other: &ShiftSegment, routes: &[Polygon]) -> bool {
+        // Must be same route
+        if self.route_idx != other.route_idx {
+            return false;
+        }
+
+        // Case 1: Both are final segments and overlapping
+        if self.final_segment && other.final_segment && self.overlaps(other, routes) {
+            // If both segments are in shapes then we know limits and can align.
+            // Otherwise we do this just for segments that are very close together,
+            // since these will often prevent nudging, or force it to have a tiny
+            // separation value.
+            let self_low = self.low_point(routes);
+            let other_low = other.low_point(routes);
+            let dim = self.dimension;
+
+            let self_pos = if dim == 0 { self_low.y } else { self_low.x };
+            let other_pos = if dim == 0 { other_low.y } else { other_low.x };
+
+            if (self.connected_to_shape && other.connected_to_shape)
+                || (self_pos - other_pos).abs() < SEGMENT_POSITION_TOLERANCE
+            {
+                return true;
+            }
+        }
+        // Case 2: Not both final, one has checkpoints but not both
+        else if !(self.final_segment && other.final_segment) {
+            let has_checkpoints = !self.checkpoints.is_empty();
+            let other_has_checkpoints = !other.checkpoints.is_empty();
+
+            if has_checkpoints != other_has_checkpoints {
+                // At least one segment has checkpoints, but not both
+                let alt_dim = (self.dimension + 1) % 2;
+                let dim = self.dimension;
+
+                let self_low = self.low_point(routes);
+                let other_low = other.low_point(routes);
+
+                let self_pos = if dim == 0 { self_low.y } else { self_low.x };
+                let other_pos = if dim == 0 { other_low.y } else { other_low.x };
+                let space = (self_pos - other_pos).abs();
+
+                let self_low_alt = if alt_dim == 0 { self.low_point(routes).x } else { self.low_point(routes).y };
+                let self_high_alt = if alt_dim == 0 { self.high_point(routes).x } else { self.high_point(routes).y };
+                let other_low_alt = if alt_dim == 0 { other.low_point(routes).x } else { other.low_point(routes).y };
+                let other_high_alt = if alt_dim == 0 { other.high_point(routes).x } else { other.high_point(routes).y };
+
+                let mut touch_pos = None;
+                let mut could_touch = false;
+
+                // Check if they touch at endpoints in alt dimension
+                if (self_low_alt - other_high_alt).abs() < 1e-6 {
+                    could_touch = true;
+                    touch_pos = Some(self_low_alt);
+                } else if (self_high_alt - other_low_alt).abs() < 1e-6 {
+                    could_touch = true;
+                    touch_pos = Some(self_high_alt);
+                }
+
+                // Align if they touch and are close together, and there's no
+                // checkpoint at the touch point
+                if could_touch && space <= SEGMENT_POSITION_TOLERANCE {
+                    if let Some(pos) = touch_pos {
+                        if !self.has_checkpoint_at_position(pos, alt_dim)
+                            && !other.has_checkpoint_at_position(pos, alt_dim)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Check if there's a checkpoint at the given position in the given dimension.
+    /// C++ ref: libavoid/orthogonal.cpp:479-490 - hasCheckpointAtPosition()
+    pub fn has_checkpoint_at_position(&self, position: f64, dim: usize) -> bool {
+        for cp in &self.checkpoints {
+            let cp_pos = if dim == 0 { cp.x } else { cp.y };
+            if (cp_pos - position).abs() < 1e-6 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns ordering information for this segment based on limit constraints.
+    /// C++ ref: libavoid/orthogonal.cpp:266-287 - fixedOrder()
+    ///
+    /// Returns (is_fixed, order) where:
+    /// - is_fixed: true if segment is fixed or constrained at both ends
+    /// - order: 1 if constrained at min (must be below others),
+    ///         -1 if constrained at max (must be above others),
+    ///          0 if not constrained or fixed
+    pub fn fixed_order(&self, nudge_distance: f64) -> (bool, i32) {
+        let pos = self.position;
+        let min_limited = (pos - self.min_limit) < nudge_distance;
+        let max_limited = (self.max_limit - pos) < nudge_distance;
+
+        if self.fixed || (min_limited && max_limited) {
+            // Segment is fixed or constrained at both ends
+            (true, 0)
+        } else if min_limited {
+            // Constrained at min limit - must be below others
+            (false, 1)
+        } else if max_limited {
+            // Constrained at max limit - must be above others
+            (false, -1)
+        } else {
+            // Not constrained
+            (false, 0)
+        }
+    }
+
+    /// Merge this segment with another segment.
+    /// Adjusts limits, computes merged position, and combines indexes.
+    /// C++ ref: libavoid/orthogonal.cpp:443-478 - mergeWith()
+    pub fn merge_with(&mut self, other: &ShiftSegment, routes: &mut [Polygon]) {
+        // Adjust limits
+        self.min_limit = self.min_limit.max(other.min_limit);
+        self.max_limit = self.max_limit.min(other.max_limit);
+
+        // Find new position for the segment, taking into account
+        // the two original positions and the combined limits
+        let self_pos = self.position;
+        let other_pos = other.position;
+
+        let mut segment_pos = if other_pos < self_pos {
+            self_pos - ((self_pos - other_pos) / 2.0)
+        } else if other_pos > self_pos {
+            self_pos + ((other_pos - self_pos) / 2.0)
+        } else {
+            self_pos
+        };
+
+        // Clamp to limits
+        segment_pos = segment_pos.max(self.min_limit);
+        segment_pos = segment_pos.min(self.max_limit);
+
+        // Merge the index lists
+        self.indexes.extend(other.indexes.iter().copied());
+
+        // Sort indexes by position in alt dimension
+        let route_idx = self.route_idx;
+        let dim = self.dimension;
+        let alt_dim = (dim + 1) % 2;
+        self.indexes.sort_by(|&a, &b| {
+            let route = &routes[route_idx];
+            let pa = route.at(a);
+            let pb = route.at(b);
+            let pos_a = if alt_dim == 0 { pa.x } else { pa.y };
+            let pos_b = if alt_dim == 0 { pb.x } else { pb.y };
+            pos_a.partial_cmp(&pos_b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Apply the new position to all points to keep them constant
+        let route = &mut routes[route_idx];
+        for &idx in &self.indexes {
+            if dim == 0 {
+                route.ps[idx].y = segment_pos;
+            } else {
+                route.ps[idx].x = segment_pos;
+            }
+        }
+
+        self.position = segment_pos;
+
+        // Update low/high idx to span all merged indexes
+        if let (Some(&min_idx), Some(&max_idx)) = (self.indexes.iter().min(), self.indexes.iter().max()) {
+            self.low_idx = min_idx;
+            self.high_idx = max_idx;
+        }
+
+        // Merge checkpoints
+        self.checkpoints.extend(other.checkpoints.iter().cloned());
     }
 }
 
@@ -383,6 +637,10 @@ impl ChannelRouter {
                 segment.is_single_segment_route = true;
             }
         }
+
+        // Merge segments that should be aligned (Task #9)
+        // C++ ref: libavoid/orthogonal.cpp:2397-2400, 2779-2790
+        segments = self.merge_aligned_segments(segments, routes, dimension);
 
         // Build constraints and solve
         let (solver, seg_var_map) = self.build_vpsc_problem(&segments, routes);
@@ -763,6 +1021,83 @@ impl ChannelRouter {
         }
     }
 
+    /// Merge segments that should be aligned together.
+    /// C++ ref: libavoid/orthogonal.cpp:2397-2400, 2779-2790 - segment merging loop
+    ///
+    /// This iterates through segments of the same route and merges those where
+    /// `should_align_with()` returns true. This ensures segments that should
+    /// appear as one (e.g., two final segments of the same connector) are
+    /// treated as a single unit during nudging.
+    fn merge_aligned_segments(
+        &self,
+        mut segments: Vec<ShiftSegment>,
+        routes: &mut [Polygon],
+        _dimension: usize,
+    ) -> Vec<ShiftSegment> {
+        // We need to iterate through pairs and merge, but this is tricky because
+        // merging changes the list. Use a simple approach: mark merged segments
+        // for removal.
+        let mut merged_into: Vec<Option<usize>> = vec![None; segments.len()];
+        let mut merged = true;
+
+        // Keep iterating until no more merges happen
+        while merged {
+            merged = false;
+
+            // First pass: identify pairs to merge
+            let mut pairs_to_merge: Vec<(usize, usize)> = Vec::new();
+
+            for i in 0..segments.len() {
+                // Skip if already merged into another segment
+                if merged_into[i].is_some() {
+                    continue;
+                }
+
+                for j in (i + 1)..segments.len() {
+                    // Skip if already merged into another segment
+                    if merged_into[j].is_some() {
+                        continue;
+                    }
+
+                    // Skip different routes
+                    if segments[i].route_idx != segments[j].route_idx {
+                        continue;
+                    }
+
+                    // Check if segments should align (read-only access to routes)
+                    let routes_ref: &[Polygon] = routes;
+                    if segments[i].should_align_with(&segments[j], routes_ref) {
+                        pairs_to_merge.push((i, j));
+                    }
+                }
+            }
+
+            // Second pass: perform merges
+            for (i, j) in pairs_to_merge {
+                // Skip if either already merged in this round
+                if merged_into[i].is_some() || merged_into[j].is_some() {
+                    continue;
+                }
+
+                // Merge j into i
+                let other = segments[j].clone();
+                segments[i].merge_with(&other, routes);
+                merged_into[j] = Some(i);
+                merged = true;
+            }
+        }
+
+        // Filter out merged segments
+        let result: Vec<ShiftSegment> = segments
+            .into_iter()
+            .enumerate()
+            .filter(|(idx, _)| merged_into[*idx].is_none())
+            .map(|(_, seg)| seg)
+            .collect();
+
+        result
+    }
+
     /// Compute bounding box of a polygon
     fn polygon_bounds(poly: &Polygon) -> (f64, f64, f64, f64) {
         if poly.size() == 0 {
@@ -825,6 +1160,8 @@ impl ChannelRouter {
         // Create CHAIN constraints between adjacent overlapping segments
         // This avoids the bug where O(n²) pairwise constraints cause
         // variables to be merged at wrong offsets
+        //
+        // C++ ref: libavoid/orthogonal.cpp:1350-1400 - uses fixedOrder() for ordering
         for window in segment_order.windows(2) {
             let i = window[0];
             let j = window[1];
@@ -832,7 +1169,34 @@ impl ChannelRouter {
             if segments[i].overlaps(&segments[j], routes) {
                 let var_i = seg_var_map[i].unwrap();
                 let var_j = seg_var_map[j].unwrap();
-                solver.add_constraint(var_i, var_j, self.nudge_distance);
+
+                // Check fixed ordering constraints
+                let (i_fixed, i_order) = segments[i].fixed_order(self.nudge_distance);
+                let (j_fixed, j_order) = segments[j].fixed_order(self.nudge_distance);
+
+                // Determine constraint direction based on ordering
+                // Default: i comes before j (lower position)
+                // order = 1: segment wants to be at min (below others)
+                // order = -1: segment wants to be at max (above others)
+                let mut swap_order = false;
+
+                if i_order != 0 || j_order != 0 {
+                    // At least one segment has ordering constraints
+                    if j_order == 1 && i_order != 1 {
+                        // j wants to be at min, i doesn't - swap so j < i
+                        swap_order = true;
+                    } else if i_order == -1 && j_order != -1 {
+                        // i wants to be at max, j doesn't - swap so j < i
+                        swap_order = true;
+                    }
+                    // If both have same order or conflicting, keep default
+                }
+
+                if swap_order {
+                    solver.add_constraint(var_j, var_i, self.nudge_distance);
+                } else {
+                    solver.add_constraint(var_i, var_j, self.nudge_distance);
+                }
             }
         }
 

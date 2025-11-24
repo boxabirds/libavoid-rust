@@ -42,17 +42,22 @@ pub struct PathResult {
 // ============================================================================
 
 /// A node in the search priority queue
+///
+/// C++ ref: makepath.cpp:52-80 - ANode with timeStamp for deterministic tie-breaking
 #[derive(Debug, Clone)]
 struct SearchNode {
     vertex_id: VertexId,
     g_score: f64,              // Cost from start to this node
     f_score: f64,              // Estimated total cost (g + heuristic)
     prev_direction: Option<Point>, // Direction we came from (for angle penalty)
+    /// Timestamp for deterministic tie-breaking when f-scores are equal.
+    /// C++ ref: makepath.cpp:61-62 - higher timestamp wins (LIFO for equal costs)
+    timestamp: u64,
 }
 
 impl PartialEq for SearchNode {
     fn eq(&self, other: &Self) -> bool {
-        self.f_score == other.f_score
+        self.f_score == other.f_score && self.timestamp == other.timestamp
     }
 }
 
@@ -60,14 +65,23 @@ impl Eq for SearchNode {}
 
 impl PartialOrd for SearchNode {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // Reverse ordering for min-heap
-        other.f_score.partial_cmp(&self.f_score)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for SearchNode {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+        // C++ ref: makepath.cpp:159-175 - ANodeCmp comparison
+        // Primary: lower f-score is better (reverse for max-heap to act as min-heap)
+        // Secondary: higher timestamp wins for determinism (explored later = explored first for ties)
+        match other.f_score.partial_cmp(&self.f_score) {
+            Some(Ordering::Equal) | None => {
+                // Equal f-scores: higher timestamp wins
+                // C++ ref: makepath.cpp:168-175 - return a->timeStamp < b->timeStamp
+                self.timestamp.cmp(&other.timestamp)
+            }
+            Some(ord) => ord,
+        }
     }
 }
 
@@ -197,6 +211,9 @@ impl PathFinder {
         let mut g_score: HashMap<VertexId, f64> = HashMap::new();
         let mut closed_set: HashSet<VertexId> = HashSet::new();
 
+        // C++ ref: makepath.cpp:1081 - timestamp counter for deterministic tie-breaking
+        let mut timestamp: u64 = 1;
+
         g_score.insert(start_id, 0.0);
 
         let h = self.heuristic(&start_vertex.point, &goal_point);
@@ -205,6 +222,11 @@ impl PathFinder {
             g_score: 0.0,
             f_score: h,
             prev_direction: None,
+            timestamp: {
+                let ts = timestamp;
+                timestamp += 1;
+                ts
+            },
         });
 
         while let Some(current) = open_set.pop() {
@@ -263,11 +285,17 @@ impl PathFinder {
                     let h = self.heuristic(&target_vertex.point, &goal_point);
                     let f = tentative_g + h;
 
+                    // C++ ref: makepath.cpp:1293 - assign timestamp and increment
                     open_set.push(SearchNode {
                         vertex_id: edge.target_id,
                         g_score: tentative_g,
                         f_score: f,
                         prev_direction: Some(new_direction),
+                        timestamp: {
+                            let ts = timestamp;
+                            timestamp += 1;
+                            ts
+                        },
                     });
                 }
             }

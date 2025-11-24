@@ -2,10 +2,274 @@
 //!
 //! Hyperedges connect multiple terminals using junctions and connectors.
 //! This module provides routing for busses and other multi-point connections.
+//!
+//! C++ ref: libavoid/hyperedgeimprover.cpp - HyperedgeTreeNode, HyperedgeTreeEdge
 
 use crate::geometry::Point;
 use crate::connector::ConnEnd;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+// ============================================================================
+// Hyperedge Tree Structure (Task #20)
+// ============================================================================
+
+/// Node in hyperedge tree structure.
+/// C++ ref: libavoid/hyperedgeimprover.cpp - HyperedgeTreeNode
+#[derive(Debug, Clone)]
+pub struct HyperedgeTreeNode {
+    /// Node ID
+    pub id: u32,
+    /// Position of this node
+    pub point: Point,
+    /// Junction ID if this is a junction node
+    pub junction_id: Option<u32>,
+    /// Connector ID if this is a terminal node
+    pub connector_id: Option<u32>,
+    /// IDs of connected edges
+    pub edges: Vec<u32>,
+}
+
+impl HyperedgeTreeNode {
+    /// Creates a junction node
+    pub fn junction(id: u32, point: Point, junction_id: u32) -> Self {
+        HyperedgeTreeNode {
+            id,
+            point,
+            junction_id: Some(junction_id),
+            connector_id: None,
+            edges: Vec::new(),
+        }
+    }
+
+    /// Creates a terminal node
+    pub fn terminal(id: u32, point: Point, connector_id: u32) -> Self {
+        HyperedgeTreeNode {
+            id,
+            point,
+            junction_id: None,
+            connector_id: Some(connector_id),
+            edges: Vec::new(),
+        }
+    }
+
+    /// Returns true if this is a junction node
+    pub fn is_junction(&self) -> bool {
+        self.junction_id.is_some()
+    }
+
+    /// Returns true if this is a terminal node
+    pub fn is_terminal(&self) -> bool {
+        self.connector_id.is_some()
+    }
+
+    /// Returns the degree (number of connected edges)
+    pub fn degree(&self) -> usize {
+        self.edges.len()
+    }
+}
+
+/// Edge in hyperedge tree structure.
+/// C++ ref: libavoid/hyperedgeimprover.cpp - HyperedgeTreeEdge
+#[derive(Debug, Clone)]
+pub struct HyperedgeTreeEdge {
+    /// Edge ID
+    pub id: u32,
+    /// First endpoint node ID
+    pub node1: u32,
+    /// Second endpoint node ID
+    pub node2: u32,
+    /// Connector ID for this edge
+    pub connector_id: Option<u32>,
+    /// Route points along this edge
+    pub route_points: Vec<Point>,
+}
+
+impl HyperedgeTreeEdge {
+    pub fn new(id: u32, node1: u32, node2: u32) -> Self {
+        HyperedgeTreeEdge {
+            id,
+            node1,
+            node2,
+            connector_id: None,
+            route_points: Vec::new(),
+        }
+    }
+
+    pub fn with_connector(id: u32, node1: u32, node2: u32, connector_id: u32) -> Self {
+        HyperedgeTreeEdge {
+            id,
+            node1,
+            node2,
+            connector_id: Some(connector_id),
+            route_points: Vec::new(),
+        }
+    }
+
+    /// Returns the other endpoint from the given node
+    pub fn other_node(&self, from: u32) -> u32 {
+        if from == self.node1 {
+            self.node2
+        } else {
+            self.node1
+        }
+    }
+}
+
+/// Hyperedge tree for representing the structure of a multi-terminal connection.
+/// C++ ref: libavoid/hyperedgeimprover.cpp - HyperedgeTree
+#[derive(Debug, Clone, Default)]
+pub struct HyperedgeTree {
+    /// Nodes in the tree (junctions and terminals)
+    pub nodes: HashMap<u32, HyperedgeTreeNode>,
+    /// Edges in the tree (connections between nodes)
+    pub edges: HashMap<u32, HyperedgeTreeEdge>,
+    /// Next available node ID
+    next_node_id: u32,
+    /// Next available edge ID
+    next_edge_id: u32,
+}
+
+impl HyperedgeTree {
+    pub fn new() -> Self {
+        HyperedgeTree {
+            nodes: HashMap::new(),
+            edges: HashMap::new(),
+            next_node_id: 0,
+            next_edge_id: 0,
+        }
+    }
+
+    /// Adds a junction node
+    pub fn add_junction(&mut self, point: Point, junction_id: u32) -> u32 {
+        let id = self.next_node_id;
+        self.next_node_id += 1;
+        self.nodes.insert(id, HyperedgeTreeNode::junction(id, point, junction_id));
+        id
+    }
+
+    /// Adds a terminal node
+    pub fn add_terminal(&mut self, point: Point, connector_id: u32) -> u32 {
+        let id = self.next_node_id;
+        self.next_node_id += 1;
+        self.nodes.insert(id, HyperedgeTreeNode::terminal(id, point, connector_id));
+        id
+    }
+
+    /// Adds an edge between two nodes
+    pub fn add_edge(&mut self, node1: u32, node2: u32, connector_id: Option<u32>) -> u32 {
+        let id = self.next_edge_id;
+        self.next_edge_id += 1;
+
+        let edge = if let Some(cid) = connector_id {
+            HyperedgeTreeEdge::with_connector(id, node1, node2, cid)
+        } else {
+            HyperedgeTreeEdge::new(id, node1, node2)
+        };
+
+        // Update node edge lists
+        if let Some(node) = self.nodes.get_mut(&node1) {
+            node.edges.push(id);
+        }
+        if let Some(node) = self.nodes.get_mut(&node2) {
+            node.edges.push(id);
+        }
+
+        self.edges.insert(id, edge);
+        id
+    }
+
+    /// Removes a node and its edges
+    pub fn remove_node(&mut self, node_id: u32) {
+        if let Some(node) = self.nodes.remove(&node_id) {
+            // Remove all connected edges
+            for edge_id in node.edges {
+                if let Some(edge) = self.edges.remove(&edge_id) {
+                    // Remove edge from other node's edge list
+                    let other = edge.other_node(node_id);
+                    if let Some(other_node) = self.nodes.get_mut(&other) {
+                        other_node.edges.retain(|&e| e != edge_id);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Removes zero-length edges and merges their endpoints.
+    /// C++ ref: libavoid/hyperedgeimprover.cpp - removeZeroLengthEdges()
+    pub fn remove_zero_length_edges(&mut self) {
+        const EPSILON: f64 = 1e-6;
+
+        let mut edges_to_remove: Vec<u32> = Vec::new();
+
+        for (&edge_id, edge) in &self.edges {
+            if let (Some(n1), Some(n2)) = (self.nodes.get(&edge.node1), self.nodes.get(&edge.node2)) {
+                if n1.point.distance(&n2.point) < EPSILON {
+                    edges_to_remove.push(edge_id);
+                }
+            }
+        }
+
+        for edge_id in edges_to_remove {
+            if let Some(edge) = self.edges.remove(&edge_id) {
+                // Remove from both nodes' edge lists
+                if let Some(n1) = self.nodes.get_mut(&edge.node1) {
+                    n1.edges.retain(|&e| e != edge_id);
+                }
+                if let Some(n2) = self.nodes.get_mut(&edge.node2) {
+                    n2.edges.retain(|&e| e != edge_id);
+                }
+
+                // Merge node2 into node1 (keep node1, redirect edges from node2)
+                if let Some(node2) = self.nodes.remove(&edge.node2) {
+                    for other_edge_id in node2.edges {
+                        if other_edge_id == edge_id {
+                            continue;
+                        }
+                        if let Some(other_edge) = self.edges.get_mut(&other_edge_id) {
+                            // Redirect edge to point to node1 instead of node2
+                            if other_edge.node1 == edge.node2 {
+                                other_edge.node1 = edge.node1;
+                            } else if other_edge.node2 == edge.node2 {
+                                other_edge.node2 = edge.node1;
+                            }
+                        }
+                        // Add edge to node1's list
+                        if let Some(n1) = self.nodes.get_mut(&edge.node1) {
+                            if !n1.edges.contains(&other_edge_id) {
+                                n1.edges.push(other_edge_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Computes total tree cost (sum of edge lengths)
+    pub fn total_cost(&self) -> f64 {
+        let mut cost = 0.0;
+        for edge in self.edges.values() {
+            if let (Some(n1), Some(n2)) = (self.nodes.get(&edge.node1), self.nodes.get(&edge.node2)) {
+                cost += n1.point.distance(&n2.point);
+            }
+        }
+        cost
+    }
+
+    /// Returns all junction nodes
+    pub fn junctions(&self) -> impl Iterator<Item = &HyperedgeTreeNode> {
+        self.nodes.values().filter(|n| n.is_junction())
+    }
+
+    /// Returns all terminal nodes
+    pub fn terminals(&self) -> impl Iterator<Item = &HyperedgeTreeNode> {
+        self.nodes.values().filter(|n| n.is_terminal())
+    }
+}
+
+// ============================================================================
+// Hyperedge Reference
+// ============================================================================
 
 /// A hyperedge connecting multiple terminals
 #[derive(Debug, Clone)]
@@ -384,19 +648,19 @@ impl HyperedgeRerouter {
 }
 
 // ============================================================================
-// Hyperedge Tree Building
+// Hyperedge Tree Building (Simple helpers)
 // ============================================================================
 
-/// Represents an edge in the hyperedge tree
+/// Simple edge representation for tree building (from-to pair)
 #[derive(Debug, Clone)]
-pub struct HyperedgeTreeEdge {
+pub struct SimpleTreeEdge {
     pub from: Point,
     pub to: Point,
     pub is_terminal: bool,
 }
 
 /// Builds a minimum spanning tree connecting all terminals through junctions
-pub fn build_hyperedge_tree(terminals: &[ConnEnd], junctions: &[Point]) -> Vec<HyperedgeTreeEdge> {
+pub fn build_hyperedge_tree(terminals: &[ConnEnd], junctions: &[Point]) -> Vec<SimpleTreeEdge> {
     let mut edges = Vec::new();
 
     if terminals.is_empty() {
@@ -418,7 +682,7 @@ pub fn build_hyperedge_tree(terminals: &[ConnEnd], junctions: &[Point]) -> Vec<H
         let center = Point::new(cx, cy);
 
         for t in &terminal_points {
-            edges.push(HyperedgeTreeEdge {
+            edges.push(SimpleTreeEdge {
                 from: *t,
                 to: center,
                 is_terminal: true,
@@ -436,7 +700,7 @@ pub fn build_hyperedge_tree(terminals: &[ConnEnd], junctions: &[Point]) -> Vec<H
                 })
                 .unwrap();
 
-            edges.push(HyperedgeTreeEdge {
+            edges.push(SimpleTreeEdge {
                 from: *t,
                 to: *nearest,
                 is_terminal: true,
@@ -445,7 +709,7 @@ pub fn build_hyperedge_tree(terminals: &[ConnEnd], junctions: &[Point]) -> Vec<H
 
         // Connect junctions together (simple chain for now)
         for i in 0..junctions.len().saturating_sub(1) {
-            edges.push(HyperedgeTreeEdge {
+            edges.push(SimpleTreeEdge {
                 from: junctions[i],
                 to: junctions[i + 1],
                 is_terminal: false,
@@ -515,7 +779,7 @@ pub fn compute_mst(points: &[Point]) -> Vec<(usize, usize)> {
 }
 
 /// Builds a hyperedge tree using MST to connect all terminals
-pub fn build_hyperedge_tree_mst(terminals: &[ConnEnd]) -> Vec<HyperedgeTreeEdge> {
+pub fn build_hyperedge_tree_mst(terminals: &[ConnEnd]) -> Vec<SimpleTreeEdge> {
     if terminals.len() < 2 {
         return Vec::new();
     }
@@ -525,7 +789,7 @@ pub fn build_hyperedge_tree_mst(terminals: &[ConnEnd]) -> Vec<HyperedgeTreeEdge>
 
     mst_edges
         .into_iter()
-        .map(|(i, j)| HyperedgeTreeEdge {
+        .map(|(i, j)| SimpleTreeEdge {
             from: points[i],
             to: points[j],
             is_terminal: true,

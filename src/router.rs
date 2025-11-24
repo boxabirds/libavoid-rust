@@ -3,18 +3,24 @@
 //! This module provides the Router, which is the main entry point for using libavoid.
 //! The Router manages shapes, connectors, and performs the routing calculations.
 
-use crate::geometry::{Polygon, Point, PolygonInterface};
+use crate::geometry::{Polygon, Point, PolygonInterface, point_in_polygon};
 use crate::connector::{ConnRef, ConnEnd, ConnType};
 use crate::shape::ShapeRef;
 use crate::junction::JunctionRef;
 use crate::obstacle::Obstacle;
-use crate::visibility::VisibilityGraph;
+use crate::visibility::{VisibilityGraph, VertexId};
 use crate::graph::PathFinder;
 use crate::orthogonal::OrthogonalRouter;
 use crate::channel::ChannelRouter;
 use crate::action::{ActionInfo, ActionType};
 use crate::orthogonal_visgraph::{OrthogonalVisGraphGenerator, ObstacleInput, ConnectorInput};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+/// Type alias for containment map: vertex ID -> set of shape IDs containing that vertex
+pub type ContainsMap = HashMap<VertexId, HashSet<u32>>;
+
+/// Type alias for cluster containment map: vertex ID -> set of cluster IDs containing that vertex
+pub type ClusterContainsMap = HashMap<VertexId, HashSet<u32>>;
 
 /// Router flags for initialization
 pub type RouterFlags = u32;
@@ -69,6 +75,115 @@ pub enum RoutingOption {
     PerformUnifyingNudgingPreprocessingStep,
     /// Improve hyperedge routes by moving/adding/deleting junctions
     ImproveHyperedgeRoutesMovingAddingAndDeletingJunctions,
+    /// Ignore shape visibility regions (relaxes routing constraints)
+    /// C++ ref: libavoid/router.cpp - m_IgnoreRegions
+    IgnoreRegions,
+}
+
+// ============================================================================
+// Transaction Phases (Task #25)
+// ============================================================================
+
+/// Phases of transaction processing for interruptibility.
+/// C++ ref: libavoid/router.cpp - TransactionPhases enum
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TransactionPhase {
+    /// Building orthogonal visibility graph (X sweep)
+    OrthogonalVisibilityGraphScanX,
+    /// Building orthogonal visibility graph (Y sweep)
+    OrthogonalVisibilityGraphScanY,
+    /// Computing routes
+    RouteSearch,
+    /// Detecting crossings
+    CrossingDetection,
+    /// Rerouting to reduce crossings
+    RerouteSearch,
+    /// Nudging orthogonal routes (X pass)
+    OrthogonalNudgingX,
+    /// Nudging orthogonal routes (Y pass)
+    OrthogonalNudgingY,
+    /// Transaction completed
+    Completed,
+}
+
+impl TransactionPhase {
+    /// Returns the next phase in sequence
+    pub fn next(&self) -> Option<TransactionPhase> {
+        match self {
+            TransactionPhase::OrthogonalVisibilityGraphScanX => Some(TransactionPhase::OrthogonalVisibilityGraphScanY),
+            TransactionPhase::OrthogonalVisibilityGraphScanY => Some(TransactionPhase::RouteSearch),
+            TransactionPhase::RouteSearch => Some(TransactionPhase::CrossingDetection),
+            TransactionPhase::CrossingDetection => Some(TransactionPhase::RerouteSearch),
+            TransactionPhase::RerouteSearch => Some(TransactionPhase::OrthogonalNudgingX),
+            TransactionPhase::OrthogonalNudgingX => Some(TransactionPhase::OrthogonalNudgingY),
+            TransactionPhase::OrthogonalNudgingY => Some(TransactionPhase::Completed),
+            TransactionPhase::Completed => None,
+        }
+    }
+}
+
+// ============================================================================
+// Progress Callback (Task #24)
+// ============================================================================
+
+/// Progress callback function type.
+/// Called during transaction processing to report progress.
+/// C++ ref: libavoid/router.cpp - progressCallback
+///
+/// Arguments:
+/// - phase: Current transaction phase
+/// - current: Current step within phase (0-based)
+/// - total: Total steps in phase
+///
+/// Returns true to continue processing, false to abort.
+pub type ProgressCallback = Box<dyn FnMut(TransactionPhase, usize, usize) -> bool + Send>;
+
+/// Progress reporting for transaction processing
+#[derive(Default)]
+pub struct ProgressReporter {
+    /// Progress callback function
+    callback: Option<ProgressCallback>,
+    /// Current transaction phase
+    pub current_phase: Option<TransactionPhase>,
+    /// Whether transaction was interrupted
+    pub interrupted: bool,
+}
+
+impl ProgressReporter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the progress callback
+    pub fn set_callback(&mut self, callback: ProgressCallback) {
+        self.callback = Some(callback);
+    }
+
+    /// Clears the progress callback
+    pub fn clear_callback(&mut self) {
+        self.callback = None;
+    }
+
+    /// Reports progress for current phase.
+    /// Returns true if processing should continue, false if interrupted.
+    pub fn report(&mut self, phase: TransactionPhase, current: usize, total: usize) -> bool {
+        self.current_phase = Some(phase);
+        if let Some(ref mut callback) = self.callback {
+            let should_continue = callback(phase, current, total);
+            if !should_continue {
+                self.interrupted = true;
+            }
+            should_continue
+        } else {
+            true
+        }
+    }
+
+    /// Resets the interrupted flag
+    pub fn reset(&mut self) {
+        self.interrupted = false;
+        self.current_phase = None;
+    }
 }
 
 /// The main router instance for managing connector routing
@@ -115,6 +230,20 @@ pub struct Router {
     next_connector_id: u32,
     /// Next junction ID
     next_junction_id: u32,
+    /// Containment map: vertex ID -> shapes containing that vertex
+    /// Used to ignore containing shape edges during visibility computation
+    /// C++ ref: router.h:407 - ContainsMap contains;
+    contains: ContainsMap,
+    /// Enclosing clusters map: vertex ID -> clusters containing that vertex
+    /// C++ ref: router.h:409 - ContainsMap enclosingClusters;
+    enclosing_clusters: ClusterContainsMap,
+    /// Progress reporter for transaction processing (Task #24)
+    progress: ProgressReporter,
+    /// Current transaction phase (Task #25)
+    current_phase: Option<TransactionPhase>,
+    /// Whether to ignore visibility regions (relaxes routing constraints)
+    /// C++ ref: libavoid/router.cpp - m_IgnoreRegions
+    ignore_regions: bool,
 }
 
 /// Transaction operation types (legacy, kept for backwards compatibility)
@@ -158,6 +287,11 @@ impl Router {
             next_shape_id: 1,
             next_connector_id: 1,
             next_junction_id: 1,
+            contains: HashMap::new(),
+            enclosing_clusters: HashMap::new(),
+            progress: ProgressReporter::new(),
+            current_phase: None,
+            ignore_regions: false,
         };
 
         // Set default parameters (matching C++ libavoid router.cpp:89-91)
@@ -483,6 +617,37 @@ impl Router {
     /// Returns whether transaction mode is enabled
     pub fn transaction_use(&self) -> bool {
         self.transaction_mode
+    }
+
+    /// Sets a progress callback for transaction processing.
+    /// C++ ref: libavoid/router.cpp - setProgressCallback
+    ///
+    /// The callback is called during transaction processing to report progress.
+    /// Return false from the callback to abort processing.
+    pub fn set_progress_callback(&mut self, callback: ProgressCallback) {
+        self.progress.set_callback(callback);
+    }
+
+    /// Clears the progress callback
+    pub fn clear_progress_callback(&mut self) {
+        self.progress.clear_callback();
+    }
+
+    /// Returns the current transaction phase
+    pub fn current_transaction_phase(&self) -> Option<TransactionPhase> {
+        self.current_phase
+    }
+
+    /// Returns whether the ignore_regions option is set.
+    /// C++ ref: libavoid/router.cpp - router->IgnoreRegions
+    pub fn ignore_regions(&self) -> bool {
+        self.ignore_regions
+    }
+
+    /// Sets the ignore_regions option.
+    /// When true, relaxes visibility cone restrictions for improved routing.
+    pub fn set_ignore_regions(&mut self, value: bool) {
+        self.ignore_regions = value;
     }
 
     /// Processes all pending transaction operations
@@ -1187,6 +1352,126 @@ impl Router {
             transaction_mode: self.transaction_mode,
             pending_reroutes: self.reroute_queue.len(),
         }
+    }
+
+    // =========================================================================
+    // Containment Map Methods
+    // C++ ref: router.cpp:1674-1750
+    // =========================================================================
+
+    /// Generates the containment information for a vertex.
+    ///
+    /// This determines which shapes/obstacles contain the given point.
+    /// Used for connector endpoints to know which shape edges to ignore
+    /// during visibility computation (edges of containing shapes don't block).
+    ///
+    /// C++ ref: router.cpp:1674 - Router::generateContains(VertInf *pt)
+    ///
+    /// # Arguments
+    /// * `vertex_id` - The ID of the vertex in the visibility graph
+    /// * `point` - The position of the vertex
+    pub fn generate_contains(&mut self, vertex_id: VertexId, point: &Point) {
+        // Clear existing containment info for this vertex
+        self.contains.entry(vertex_id).or_default().clear();
+        self.enclosing_clusters.entry(vertex_id).or_default().clear();
+
+        // Don't count points on the border as being inside
+        // C++ ref: router.cpp:1680 - bool countBorder = false;
+        // Note: Our point_in_polygon already returns false for border points
+
+        // Compute enclosing shapes
+        // C++ ref: router.cpp:1683-1690
+        for (shape_id, shape) in &self.shapes {
+            let poly = shape.polygon();
+            if point_in_polygon(point, poly) {
+                self.contains.get_mut(&vertex_id).unwrap().insert(*shape_id);
+            }
+        }
+
+        // TODO: Compute enclosing clusters when cluster support is complete
+        // C++ ref: router.cpp:1693-1701
+    }
+
+    /// Adjusts containment map when a shape is added.
+    ///
+    /// Checks all connector endpoint vertices to see if they're now inside
+    /// the newly added shape.
+    ///
+    /// C++ ref: router.cpp:1729-1742 - Router::adjustContainsWithAdd()
+    ///
+    /// # Arguments
+    /// * `shape_id` - The ID of the newly added shape
+    pub fn adjust_contains_with_add(&mut self, shape_id: u32) {
+        let poly = if let Some(shape) = self.shapes.get(&shape_id) {
+            shape.polygon().clone()
+        } else {
+            return;
+        };
+
+        // For all connector endpoint vertices, check if they're inside the new shape
+        // C++ ref: router.cpp:1734-1741 - loop through vertices.connsBegin() to shapesBegin()
+        for (vertex_id, _) in self.vis_graph.vertices_with_ids() {
+            if let Some(vertex) = self.vis_graph.get_vertex(vertex_id) {
+                // Only check connector endpoints (not shape corners)
+                if vertex.is_connector_endpoint() {
+                    if point_in_polygon(&vertex.point, &poly) {
+                        self.contains.entry(vertex_id).or_default().insert(shape_id);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Adjusts containment map when a shape is deleted.
+    ///
+    /// Removes the deleted shape from all containment sets.
+    ///
+    /// C++ ref: router.cpp:1745-1751 - Router::adjustContainsWithDel()
+    ///
+    /// # Arguments
+    /// * `shape_id` - The ID of the deleted shape
+    pub fn adjust_contains_with_del(&mut self, shape_id: u32) {
+        // Remove shape from all containment sets
+        for shape_set in self.contains.values_mut() {
+            shape_set.remove(&shape_id);
+        }
+    }
+
+    /// Returns the set of shapes containing a given vertex.
+    ///
+    /// # Arguments
+    /// * `vertex_id` - The vertex ID to query
+    ///
+    /// # Returns
+    /// Reference to the set of shape IDs containing this vertex, or empty set if none
+    pub fn get_contains(&self, vertex_id: VertexId) -> Option<&HashSet<u32>> {
+        self.contains.get(&vertex_id)
+    }
+
+    /// Returns the set of clusters containing a given vertex.
+    ///
+    /// # Arguments
+    /// * `vertex_id` - The vertex ID to query
+    ///
+    /// # Returns
+    /// Reference to the set of cluster IDs containing this vertex, or empty set if none
+    pub fn get_enclosing_clusters(&self, vertex_id: VertexId) -> Option<&HashSet<u32>> {
+        self.enclosing_clusters.get(&vertex_id)
+    }
+
+    /// Checks if a vertex is contained by a specific shape.
+    ///
+    /// # Arguments
+    /// * `vertex_id` - The vertex ID to check
+    /// * `shape_id` - The shape ID to check containment for
+    ///
+    /// # Returns
+    /// true if the shape contains the vertex
+    pub fn is_contained_by(&self, vertex_id: VertexId, shape_id: u32) -> bool {
+        self.contains
+            .get(&vertex_id)
+            .map(|set| set.contains(&shape_id))
+            .unwrap_or(false)
     }
 }
 

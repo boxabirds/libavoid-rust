@@ -84,9 +84,10 @@ pub struct OrthogonalRouter {
 
 impl OrthogonalRouter {
     /// Creates a new orthogonal router
+    /// C++ ref: libavoid/router.cpp - bendPenalty default = 0.0
     pub fn new() -> Self {
         OrthogonalRouter {
-            bend_penalty: 50.0,
+            bend_penalty: 0.0,  // Match C++ default
             segment_penalty: 1.0,
         }
     }
@@ -412,9 +413,11 @@ pub struct OrthogonalAStarRouter {
 }
 
 impl OrthogonalAStarRouter {
+    /// Creates a new orthogonal A* router
+    /// C++ ref: libavoid/router.cpp - bendPenalty default = 0.0
     pub fn new() -> Self {
         OrthogonalAStarRouter {
-            bend_penalty: 50.0,
+            bend_penalty: 0.0,  // Match C++ default
             segment_penalty: 1.0,
             nudge_distance: 4.0,
         }

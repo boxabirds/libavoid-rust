@@ -470,6 +470,212 @@ impl IncSolver {
         }
         total
     }
+
+    /// Compute Lagrange multipliers for all active constraints in a block.
+    /// C++ ref: libavoid/vpsc.cpp:350-380 - Block::compute_lm()
+    ///
+    /// Returns the constraint with the most negative LM (best candidate for splitting).
+    fn compute_lagrange_multipliers(&mut self, block_id: usize) -> Option<usize> {
+        let block = &self.blocks[block_id];
+        if block.deleted {
+            return None;
+        }
+
+        // Find all active constraints within this block
+        let mut min_lm = 0.0;
+        let mut min_constraint = None;
+
+        for cid in 0..self.constraints.len() {
+            let constraint = &self.constraints[cid];
+            if !constraint.active {
+                continue;
+            }
+
+            // Check if both endpoints are in this block
+            let left_block = self.variables[constraint.left].block_id;
+            let right_block = self.variables[constraint.right].block_id;
+
+            if left_block != Some(block_id) || right_block != Some(block_id) {
+                continue;
+            }
+
+            // Compute Lagrange multiplier
+            // LM = derivative of cost w.r.t. relaxing this constraint
+            // For constraint l + gap <= r: LM = 2 * (sum of weighted derivatives on right side)
+            let lm = self.compute_constraint_lm(cid);
+            self.constraints[cid].lm = lm;
+
+            // Track most negative LM
+            if lm < min_lm {
+                min_lm = lm;
+                min_constraint = Some(cid);
+            }
+        }
+
+        min_constraint
+    }
+
+    /// Compute Lagrange multiplier for a single constraint.
+    /// C++ ref: libavoid/vpsc.cpp - constraint LM calculation
+    fn compute_constraint_lm(&self, constraint_id: usize) -> f64 {
+        let constraint = &self.constraints[constraint_id];
+        let right_var = &self.variables[constraint.right];
+
+        // Simple approximation: LM based on derivative at right variable
+        // Positive LM means constraint is "pulling" - wants to stay tight
+        // Negative LM means constraint is "pushing" - should be relaxed
+        right_var.dfdv()
+    }
+
+    /// Split a block at a constraint with negative Lagrange multiplier.
+    /// C++ ref: libavoid/vpsc.cpp:420-500 - Block::split()
+    ///
+    /// Returns true if split was performed.
+    fn split_block(&mut self, block_id: usize, constraint_id: usize) -> bool {
+        let constraint = &self.constraints[constraint_id];
+        let left_var = constraint.left;
+        let right_var = constraint.right;
+
+        // Verify constraint is in this block
+        if self.variables[left_var].block_id != Some(block_id)
+            || self.variables[right_var].block_id != Some(block_id)
+        {
+            return false;
+        }
+
+        // Create a new block for variables on the right side of the split
+        let new_block_id = self.blocks.len();
+        let old_block_position = self.blocks[block_id].position;
+
+        // Find variables reachable from right_var without crossing this constraint
+        let mut right_side: Vec<usize> = Vec::new();
+        let mut visited = vec![false; self.variables.len()];
+
+        self.collect_right_side(right_var, constraint_id, &mut visited, &mut right_side);
+
+        if right_side.is_empty() {
+            return false;
+        }
+
+        // Create new block
+        let mut new_block = Block {
+            id: new_block_id,
+            variables: Vec::new(),
+            position: 0.0,
+            ps: PositionStats::new(),
+            deleted: false,
+            time_stamp: 0,
+        };
+
+        // Move right-side variables to new block
+        for &var_idx in &right_side {
+            // Calculate absolute position
+            let abs_pos = old_block_position + self.variables[var_idx].offset;
+
+            // Move to new block
+            self.variables[var_idx].block_id = Some(new_block_id);
+            new_block.variables.push(var_idx);
+        }
+
+        // Remove right-side variables from old block
+        self.blocks[block_id]
+            .variables
+            .retain(|&v| !right_side.contains(&v));
+
+        // Add new block
+        self.blocks.push(new_block);
+
+        // Update block statistics and positions
+        self.blocks[block_id].update_weighted_position(&self.variables);
+        self.blocks[new_block_id].update_weighted_position(&self.variables);
+
+        // Deactivate the constraint we split on
+        self.constraints[constraint_id].active = false;
+
+        // Update final positions
+        for &var_idx in &self.blocks[block_id].variables {
+            self.variables[var_idx].final_position =
+                self.blocks[block_id].position + self.variables[var_idx].offset;
+        }
+        for &var_idx in &self.blocks[new_block_id].variables {
+            self.variables[var_idx].final_position =
+                self.blocks[new_block_id].position + self.variables[var_idx].offset;
+        }
+
+        true
+    }
+
+    /// Collect variables reachable from start_var without crossing split_constraint
+    fn collect_right_side(
+        &self,
+        start_var: usize,
+        split_constraint: usize,
+        visited: &mut [bool],
+        result: &mut Vec<usize>,
+    ) {
+        if visited[start_var] {
+            return;
+        }
+        visited[start_var] = true;
+        result.push(start_var);
+
+        // Follow outgoing constraints
+        for &cid in &self.variables[start_var].constraints_out {
+            if cid == split_constraint || !self.constraints[cid].active {
+                continue;
+            }
+            let next = self.constraints[cid].right;
+            self.collect_right_side(next, split_constraint, visited, result);
+        }
+
+        // Follow incoming constraints (go backwards)
+        for &cid in &self.variables[start_var].constraints_in {
+            if cid == split_constraint || !self.constraints[cid].active {
+                continue;
+            }
+            let next = self.constraints[cid].left;
+            self.collect_right_side(next, split_constraint, visited, result);
+        }
+    }
+
+    /// Solve with optimization phase (split blocks with negative LMs).
+    /// C++ ref: libavoid/vpsc.cpp - IncSolver::solve()
+    pub fn solve_optimal(&mut self) {
+        // First satisfy all constraints
+        self.solve();
+
+        // Then optimize by splitting blocks with negative LMs
+        let max_split_iterations = self.blocks.len() * 2;
+        for _ in 0..max_split_iterations {
+            let mut did_split = false;
+
+            for block_id in 0..self.blocks.len() {
+                if self.blocks[block_id].deleted {
+                    continue;
+                }
+
+                // Compute LMs and find best split candidate
+                if let Some(split_constraint) = self.compute_lagrange_multipliers(block_id) {
+                    if self.constraints[split_constraint].lm < -1e-10 {
+                        // Split improves solution
+                        if self.split_block(block_id, split_constraint) {
+                            did_split = true;
+                            break; // Restart iteration after split
+                        }
+                    }
+                }
+            }
+
+            if !did_split {
+                break;
+            }
+
+            // Re-run satisfy phase after splitting
+            self.solve();
+        }
+
+        self.update_final_positions();
+    }
 }
 
 impl Default for IncSolver {

@@ -187,6 +187,12 @@ pub struct VertInf {
     pub shape_edge_before: Option<usize>,
     /// Shape edge index after this vertex (for corners)
     pub shape_edge_after: Option<usize>,
+    /// Previous point on shape boundary (for visibility cone check)
+    /// C++ ref: VertInf::shPrev
+    pub shape_prev_point: Option<Point>,
+    /// Next point on shape boundary (for visibility cone check)
+    /// C++ ref: VertInf::shNext
+    pub shape_next_point: Option<Point>,
     /// Connection pin ID (for endpoint vertices)
     pub connection_pin: Option<u32>,
     /// Visibility edges to other vertices
@@ -209,6 +215,8 @@ impl VertInf {
             obstacle_id: None,
             shape_edge_before: None,
             shape_edge_after: None,
+            shape_prev_point: None,
+            shape_next_point: None,
             connection_pin: None,
             edges: Vec::new(),
             orthogonal_edges: Vec::new(),
@@ -232,6 +240,45 @@ impl VertInf {
             obstacle_id: Some(obstacle_id),
             shape_edge_before: Some(edge_before),
             shape_edge_after: Some(edge_after),
+            shape_prev_point: None,
+            shape_next_point: None,
+            connection_pin: None,
+            edges: Vec::new(),
+            orthogonal_edges: Vec::new(),
+            search_state: SearchState::new(),
+            active: true,
+        }
+    }
+
+    /// Creates a shape corner vertex with neighboring points for visibility cone checks.
+    /// C++ ref: visibility.cpp:590-602 - uses shPrev and shNext for inValidRegion()
+    ///
+    /// # Arguments
+    /// * `id` - Unique vertex ID
+    /// * `point` - The corner point location
+    /// * `obstacle_id` - ID of the owning obstacle
+    /// * `edge_before` - Shape edge index before this vertex
+    /// * `edge_after` - Shape edge index after this vertex
+    /// * `prev_point` - Previous point on shape boundary (for visibility cone)
+    /// * `next_point` - Next point on shape boundary (for visibility cone)
+    pub fn shape_corner_with_neighbors(
+        id: VertexId,
+        point: Point,
+        obstacle_id: ObstacleId,
+        edge_before: usize,
+        edge_after: usize,
+        prev_point: Point,
+        next_point: Point,
+    ) -> Self {
+        VertInf {
+            id,
+            point,
+            vertex_type: VertexType::ShapeCorner,
+            obstacle_id: Some(obstacle_id),
+            shape_edge_before: Some(edge_before),
+            shape_edge_after: Some(edge_after),
+            shape_prev_point: Some(prev_point),
+            shape_next_point: Some(next_point),
             connection_pin: None,
             edges: Vec::new(),
             orthogonal_edges: Vec::new(),
@@ -249,6 +296,8 @@ impl VertInf {
             obstacle_id: None,
             shape_edge_before: None,
             shape_edge_after: None,
+            shape_prev_point: None,
+            shape_next_point: None,
             connection_pin: pin_id,
             edges: Vec::new(),
             orthogonal_edges: Vec::new(),
@@ -266,6 +315,8 @@ impl VertInf {
             obstacle_id: None,
             shape_edge_before: None,
             shape_edge_after: None,
+            shape_prev_point: None,
+            shape_next_point: None,
             connection_pin: None,
             edges: Vec::new(),
             orthogonal_edges: Vec::new(),
@@ -302,6 +353,23 @@ impl VertInf {
     pub fn remove_edges_to(&mut self, target_id: VertexId) {
         self.edges.retain(|e| e.target_id != target_id);
         self.orthogonal_edges.retain(|e| e.target_id != target_id);
+    }
+
+    /// Returns true if this is a connector endpoint vertex
+    /// C++ ref: VertID::isConnPt() - checks if vertex is a connector point
+    pub fn is_connector_endpoint(&self) -> bool {
+        matches!(self.vertex_type, VertexType::ConnectorEnd | VertexType::Checkpoint)
+    }
+
+    /// Returns true if this is a shape corner vertex
+    pub fn is_shape_corner(&self) -> bool {
+        matches!(self.vertex_type, VertexType::ShapeCorner)
+    }
+
+    /// Returns true if this is a connection pin vertex
+    /// C++ ref: VertID::isConnectionPin()
+    pub fn is_connection_pin(&self) -> bool {
+        self.connection_pin.is_some()
     }
 
     /// Gets all edges (both regular and orthogonal)
@@ -400,6 +468,41 @@ impl VisibilityGraph {
         id
     }
 
+    /// Adds a shape corner vertex with neighboring points for visibility cone checks.
+    /// C++ ref: visibility.cpp:590-602 - uses shPrev and shNext for inValidRegion()
+    ///
+    /// # Arguments
+    /// * `point` - The corner point location
+    /// * `obstacle_id` - ID of the owning obstacle
+    /// * `edge_before` - Shape edge index before this vertex
+    /// * `edge_after` - Shape edge index after this vertex
+    /// * `prev_point` - Previous point on shape boundary (for visibility cone)
+    /// * `next_point` - Next point on shape boundary (for visibility cone)
+    pub fn add_shape_corner_with_neighbors(
+        &mut self,
+        point: Point,
+        obstacle_id: ObstacleId,
+        edge_before: usize,
+        edge_after: usize,
+        prev_point: Point,
+        next_point: Point,
+    ) -> VertexId {
+        let id = self.next_vertex_id;
+        self.next_vertex_id += 1;
+
+        let vertex = VertInf::shape_corner_with_neighbors(
+            id,
+            point,
+            obstacle_id,
+            edge_before,
+            edge_after,
+            prev_point,
+            next_point,
+        );
+        self.vertices.insert(id, vertex);
+        id
+    }
+
     /// Adds a connector endpoint vertex
     pub fn add_connector_end(&mut self, point: Point, pin_id: Option<u32>) -> VertexId {
         let id = self.next_vertex_id;
@@ -478,10 +581,57 @@ impl VisibilityGraph {
         vertex_id: VertexId,
         obstacles: &[&dyn Obstacle],
     ) {
+        // Call the version with no containment - for backwards compatibility
+        self.compute_vertex_visibility_with_contains(vertex_id, obstacles, None);
+    }
+
+    /// Computes visibility between a vertex and all other vertices, with containment handling.
+    ///
+    /// When `containing_shapes` is provided and the center vertex is a connector endpoint,
+    /// this will skip shape corner vertices that belong to the containing shapes.
+    /// This prevents shapes from blocking visibility when endpoints are inside them.
+    ///
+    /// C++ ref: visibility.cpp:436 - vertexSweep() with contains[centerID] usage
+    ///
+    /// # Arguments
+    /// * `vertex_id` - The vertex to compute visibility for
+    /// * `obstacles` - All obstacles in the scene
+    /// * `containing_shapes` - Optional set of shape IDs that contain this vertex
+    pub fn compute_vertex_visibility_with_contains(
+        &mut self,
+        vertex_id: VertexId,
+        obstacles: &[&dyn Obstacle],
+        containing_shapes: Option<&HashSet<u32>>,
+    ) {
+        // Default: don't ignore regions (match C++ default)
+        self.compute_vertex_visibility_with_cones(vertex_id, obstacles, containing_shapes, false);
+    }
+
+    /// Computes visibility between a vertex and all other vertices, with containment and
+    /// visibility cone handling.
+    ///
+    /// C++ ref: visibility.cpp:436-620 - vertexSweep() with inValidRegion() cone checks
+    ///
+    /// # Arguments
+    /// * `vertex_id` - The vertex to compute visibility for
+    /// * `obstacles` - All obstacles in the scene
+    /// * `containing_shapes` - Optional set of shape IDs that contain this vertex
+    /// * `ignore_regions` - If true, relaxes visibility cone restrictions for improved routing
+    pub fn compute_vertex_visibility_with_cones(
+        &mut self,
+        vertex_id: VertexId,
+        obstacles: &[&dyn Obstacle],
+        containing_shapes: Option<&HashSet<u32>>,
+        ignore_regions: bool,
+    ) {
+        use crate::geometry::in_valid_region;
+
         let vertex = match self.vertices.get(&vertex_id) {
             Some(v) => v.clone(),
             None => return,
         };
+
+        let is_connector_point = vertex.is_connector_endpoint();
 
         // Collect all visible edges first without holding mutable borrows
         // Store: (other_id, other_point, distance, orthogonal, forward_direction, reverse_direction)
@@ -493,12 +643,65 @@ impl VisibilityGraph {
                 continue;
             }
 
-            let other_point = match self.vertices.get(&other_id) {
-                Some(v) => v.point,
+            let other = match self.vertices.get(&other_id) {
+                Some(v) => v.clone(),
                 None => continue,
             };
 
-            if self.is_visible(&vertex.point, &other_point, obstacles) {
+            // C++ ref: visibility.cpp:467-475
+            // If center is a connector point and other is a shape corner from a containing shape,
+            // skip it - we don't want containing shape edges to block visibility
+            if is_connector_point {
+                if let Some(contains) = containing_shapes {
+                    if other.is_shape_corner() {
+                        if let Some(obstacle_id) = other.obstacle_id {
+                            if contains.contains(&obstacle_id) {
+                                // Don't include edge points of containing shapes
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let other_point = other.point;
+
+            // C++ ref: visibility.cpp:590-602 - Visibility cone checks
+            // cone1: If center is a shape corner, check if other is in center's valid region
+            // cone2: If other is a shape corner, check if center is in other's valid region
+            let cone1 = if !vertex.is_connector_endpoint() {
+                // Center is a shape corner - check visibility cone
+                match (vertex.shape_prev_point, vertex.shape_next_point) {
+                    (Some(prev), Some(next)) => {
+                        in_valid_region(ignore_regions, &prev, &vertex.point, &next, &other_point)
+                    }
+                    // If no cone info, assume visible (backwards compatibility)
+                    _ => true,
+                }
+            } else {
+                true // Connector endpoints have no cone restrictions
+            };
+
+            let cone2 = if !other.is_connector_endpoint() {
+                // Other is a shape corner - check visibility cone
+                match (other.shape_prev_point, other.shape_next_point) {
+                    (Some(prev), Some(next)) => {
+                        in_valid_region(ignore_regions, &prev, &other.point, &next, &vertex.point)
+                    }
+                    // If no cone info, assume visible (backwards compatibility)
+                    _ => true,
+                }
+            } else {
+                true // Connector endpoints have no cone restrictions
+            };
+
+            // C++ ref: visibility.cpp:604 - Both cone checks must pass
+            if !cone1 || !cone2 {
+                continue;
+            }
+
+            // Use visibility check that ignores containing shapes
+            if self.is_visible_ignoring(&vertex.point, &other_point, obstacles, containing_shapes) {
                 let distance = vertex.point.distance(&other_point);
                 let orthogonal = is_orthogonal(&vertex.point, &other_point);
                 let forward_direction = if orthogonal {
@@ -563,10 +766,39 @@ impl VisibilityGraph {
     /// Checks if two points are visible to each other.
     /// Uses proper polygon interior intersection test.
     pub fn is_visible(&self, p1: &Point, p2: &Point, obstacles: &[&dyn Obstacle]) -> bool {
+        self.is_visible_ignoring(p1, p2, obstacles, None)
+    }
+
+    /// Checks if two points are visible, ignoring specified containing shapes.
+    ///
+    /// This is used when computing visibility for connector endpoints that are
+    /// inside shapes - the containing shapes should not block visibility.
+    ///
+    /// C++ ref: visibility.cpp:385-408 - sweepVisible() containment check
+    ///
+    /// # Arguments
+    /// * `p1` - First point
+    /// * `p2` - Second point
+    /// * `obstacles` - All obstacles in the scene
+    /// * `ignore_shapes` - Optional set of shape IDs to ignore (containing shapes)
+    pub fn is_visible_ignoring(
+        &self,
+        p1: &Point,
+        p2: &Point,
+        obstacles: &[&dyn Obstacle],
+        ignore_shapes: Option<&HashSet<u32>>,
+    ) -> bool {
         // Check if the edge intersects any obstacle interior
         for obstacle in obstacles {
             if !obstacle.is_active() {
                 continue;
+            }
+
+            // Skip obstacles that are in the ignore set (containing shapes)
+            if let Some(ignore) = ignore_shapes {
+                if ignore.contains(&obstacle.id()) {
+                    continue;
+                }
             }
 
             // Use the proper polygon intersection test that handles
@@ -582,6 +814,11 @@ impl VisibilityGraph {
     /// Returns an iterator over all vertices
     pub fn vertices(&self) -> impl Iterator<Item = &VertInf> {
         self.vertices.values()
+    }
+
+    /// Returns an iterator over all vertices with their IDs
+    pub fn vertices_with_ids(&self) -> impl Iterator<Item = (VertexId, &VertInf)> {
+        self.vertices.iter().map(|(&id, v)| (id, v))
     }
 
     /// Returns the number of vertices

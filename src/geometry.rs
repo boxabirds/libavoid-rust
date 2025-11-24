@@ -968,27 +968,55 @@ pub fn ray_intersect_point(
     (DO_INTERSECT, Point::new(ix, iy))
 }
 
-/// Checks if point p is in a valid region for shortest paths.
-/// a0, a1, a2 are ordered vertices of a shape (a1 is the corner).
-/// Based on the InCone algorithm from computational geometry.
+/// Checks if point b is in a valid region that can contain shortest paths.
+/// a0, a1, a2 are ordered vertices of a shape (a1 is the corner being tested).
+///
+/// Based on the 'InCone' algorithm from computational geometry.
+///
+/// C++ ref: geometry.cpp:201 - inValidRegion()
+///
+/// # Arguments
+/// * `ignore_regions` - If true, uses stricter visibility cone checks
+/// * `a0` - Point before corner (on shape boundary)
+/// * `a1` - The corner point
+/// * `a2` - Point after corner (on shape boundary)
+/// * `b` - The point to test
 pub fn in_valid_region(
-    _ignore_regions: bool,
+    ignore_regions: bool,
     a0: &Point,
     a1: &Point,
     a2: &Point,
-    p: &Point,
+    b: &Point,
 ) -> bool {
-    // Check if p is in the cone formed by going from a0 to a1 to a2
-    let a1_a0 = vec_dir(a1, a0, p);
-    let a1_a2 = vec_dir(a1, a2, p);
+    // r is the edge a0--a1
+    // s is the edge a1--a2
+    // C++ ref: geometry.cpp:207-208
+    let r_side = vec_dir(b, a0, a1);
+    let s_side = vec_dir(b, a1, a2);
 
-    // If the corner is convex (left turn)
-    if vec_dir(a0, a1, a2) >= 0 {
-        // p must be on left of both edges
-        a1_a0 >= 0 && a1_a2 >= 0
+    // C++ ref: geometry.cpp:210-214
+    let r_out_on = r_side <= 0;  // b is outside or on edge r
+    let s_out_on = s_side <= 0;  // b is outside or on edge s
+    let r_out = r_side < 0;      // b is strictly outside edge r
+    let s_out = s_side < 0;      // b is strictly outside edge s
+
+    // C++ ref: geometry.cpp:216
+    if vec_dir(a0, a1, a2) > 0 {
+        // Convex corner at a1
+        // C++ ref: geometry.cpp:229-233
+        if ignore_regions {
+            (r_out_on && !s_out) || (!r_out && s_out_on)
+        } else {
+            r_out_on || s_out_on
+        }
     } else {
-        // Reflex corner: p must NOT be in the reflex region
-        !(a1_a0 < 0 && a1_a2 < 0)
+        // Concave (reflex) corner at a1
+        // C++ ref: geometry.cpp:248
+        if ignore_regions {
+            false
+        } else {
+            r_out_on && s_out_on
+        }
     }
 }
 
