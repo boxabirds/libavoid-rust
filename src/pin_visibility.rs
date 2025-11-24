@@ -3,7 +3,6 @@
 //! Handles visibility between connection pins on shapes.
 //! C++ Reference: libavoid/shape.cpp:330-420
 
-use crate::geometry::Point;
 use crate::shape::ConnectionPin;
 use std::collections::HashMap;
 

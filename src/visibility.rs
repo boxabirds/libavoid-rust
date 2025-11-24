@@ -889,11 +889,7 @@ impl VisibilityGraph {
         vertex_id: VertexId,
         obstacles: &[&dyn Obstacle],
     ) {
-        use crate::geometry::{
-            rotational_angle, vec_dir, point_on_line, ray_intersect_point,
-            segments_intersect, in_valid_region, DO_INTERSECT, VEC_DIR_AHEAD, VEC_DIR_BEHIND,
-        };
-        use std::collections::BTreeSet;
+        use crate::geometry::{rotational_angle, segments_intersect};
 
         let center = match self.vertices.get(&vertex_id) {
             Some(v) => v.point,
@@ -966,8 +962,9 @@ impl VisibilityGraph {
         }
 
         // Find edges each vertex belongs to (for add/remove during sweep)
-        let mut vertex_edges: HashMap<(u32, u32), Vec<SweepEdge>> = HashMap::new();
-        for edge in &obstacle_edges {
+        // TODO: Implement proper edge tracking for sweep algorithm
+        let _vertex_edges: HashMap<(u32, u32), Vec<SweepEdge>> = HashMap::new();
+        for _edge in &obstacle_edges {
             // We'll track edges by their endpoint vertex IDs if available
             // For now, we use position-based matching
         }
@@ -1106,7 +1103,7 @@ impl VisibilityGraph {
 
             // Determine if the other endpoint is ahead or behind the sweep ray
             let other = if is_p1 { &edge.p2 } else { &edge.p1 };
-            let x_ray = Point::new(center.x + 1e10, center.y);
+            let _x_ray = Point::new(center.x + 1e10, center.y); // Reserved for ray casting
             let dir = vec_dir(center, current_point, other);
 
             if dir == VEC_DIR_BEHIND {
@@ -1136,6 +1133,7 @@ struct SweepPoint {
 struct SweepEdge {
     p1: Point,
     p2: Point,
+    #[allow(dead_code)] // Reserved for obstacle tracking
     obstacle_id: u32,
 }
 

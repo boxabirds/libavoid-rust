@@ -171,6 +171,7 @@ impl OrthogonalRouter {
     }
 
     /// Routes horizontal-then-vertical
+    #[allow(dead_code)] // Alternative routing strategy
     fn route_h_v(&self, start: Point, end: Point, obstacles: &[&dyn Obstacle]) -> Polygon {
         let mut poly = Polygon::with_capacity(3);
         poly.push(start);
@@ -201,6 +202,7 @@ impl OrthogonalRouter {
     }
 
     /// Routes vertical-then-horizontal
+    #[allow(dead_code)] // Alternative routing strategy
     fn route_v_h(&self, start: Point, end: Point, obstacles: &[&dyn Obstacle]) -> Polygon {
         let mut poly = Polygon::with_capacity(3);
         poly.push(start);
@@ -403,12 +405,15 @@ fn encode_node(x: i32, y: i32, dir: Option<Direction>) -> NodeId {
 }
 
 /// Grid resolution for discretization
-const GRID_RESOLUTION: f64 = 1.0;
+/// Grid resolution for A* routing. Higher values = fewer steps but less precise.
+/// Note: This should ideally match the nudge distance or obstacle buffer.
+const GRID_RESOLUTION: f64 = 4.0;
 
 /// Advanced orthogonal router using A* on an implicit grid
 pub struct OrthogonalAStarRouter {
     bend_penalty: f64,
     segment_penalty: f64,
+    #[allow(dead_code)] // Reserved for post-routing nudge
     nudge_distance: f64,
 }
 

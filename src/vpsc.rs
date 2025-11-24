@@ -310,8 +310,19 @@ impl IncSolver {
 
     /// Add a constraint and return its index
     pub fn add_constraint(&mut self, left: usize, right: usize, gap: f64) -> usize {
+        self.add_constraint_internal(left, right, gap, false)
+    }
+
+    /// Add an equality constraint (forces exact separation)
+    /// C++ ref: libavoid/orthogonal.cpp:2779-2786 - equality=true for shouldAlignWith
+    pub fn add_equality_constraint(&mut self, left: usize, right: usize, gap: f64) -> usize {
+        self.add_constraint_internal(left, right, gap, true)
+    }
+
+    fn add_constraint_internal(&mut self, left: usize, right: usize, gap: f64, equality: bool) -> usize {
         let id = self.constraints.len();
-        let constraint = Constraint::new(id, left, right, gap);
+        let mut constraint = Constraint::new(id, left, right, gap);
+        constraint.equality = equality;
 
         // Add to variable's constraint lists
         self.variables[left].constraints_out.push(id);
@@ -346,6 +357,7 @@ impl IncSolver {
 
         // Simple greedy constraint satisfaction
         // Process constraints in order until no more violations
+        // C++ ref: libavoid/vpsc.cpp:284 - equality constraints are always processed
         let max_iterations = self.constraints.len() * 2 + 1;
         for _ in 0..max_iterations {
             let mut satisfied_any = false;
@@ -356,8 +368,12 @@ impl IncSolver {
                 }
 
                 let slack = self.constraints[cid].slack(&self.variables);
-                if slack < -1e-10 {
-                    // Constraint violated - merge blocks
+                let is_equality = self.constraints[cid].equality;
+
+                // Process if: equality constraint OR violated (slack < 0)
+                // Equality constraints must always be activated to force alignment
+                if is_equality || slack < -1e-10 {
+                    // Constraint needs to be satisfied - merge blocks
                     if self.satisfy_constraint(cid) {
                         satisfied_any = true;
                     }
@@ -545,7 +561,7 @@ impl IncSolver {
 
         // Create a new block for variables on the right side of the split
         let new_block_id = self.blocks.len();
-        let old_block_position = self.blocks[block_id].position;
+        let _old_block_position = self.blocks[block_id].position; // Preserved for debugging
 
         // Find variables reachable from right_var without crossing this constraint
         let mut right_side: Vec<usize> = Vec::new();
@@ -569,10 +585,8 @@ impl IncSolver {
 
         // Move right-side variables to new block
         for &var_idx in &right_side {
-            // Calculate absolute position
-            let abs_pos = old_block_position + self.variables[var_idx].offset;
-
-            // Move to new block
+            // Note: absolute position would be old_block_position + offset
+            // Currently not needed as we recalculate positions after split
             self.variables[var_idx].block_id = Some(new_block_id);
             new_block.variables.push(var_idx);
         }

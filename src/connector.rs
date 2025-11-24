@@ -666,6 +666,7 @@ impl ConnRef {
     }
 
     /// Internal method to set both route and display route
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn set_routes(&mut self, route: Polygon, display_route: Polygon) {
         self.route = Some(route);
         self.display_route = Some(display_route);
@@ -678,6 +679,7 @@ impl ConnRef {
     }
 
     /// Internal method to mark as not needing repaint
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn mark_painted(&mut self) {
         self.needs_repaint = false;
     }
@@ -688,6 +690,7 @@ impl ConnRef {
     }
 
     /// Sets whether the connector is active
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn set_active(&mut self, active: bool) {
         self.active = active;
     }

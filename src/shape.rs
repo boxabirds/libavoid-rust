@@ -193,6 +193,7 @@ impl ShapeRef {
     }
 
     /// Returns a mutable reference to the obstacle data
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn data_mut(&mut self) -> &mut ObstacleData {
         &mut self.data
     }

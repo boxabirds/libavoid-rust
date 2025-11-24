@@ -328,6 +328,7 @@ impl HyperedgeRef {
     }
 
     /// Adds a connector to the hyperedge
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn add_connector(&mut self, conn_id: u32) {
         self.connectors.insert(conn_id);
     }
@@ -338,6 +339,7 @@ impl HyperedgeRef {
     }
 
     /// Adds a junction to the hyperedge
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn add_junction(&mut self, junction_id: u32) {
         self.junctions.insert(junction_id);
     }
@@ -348,11 +350,13 @@ impl HyperedgeRef {
     }
 
     /// Marks the hyperedge as needing reroute
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn mark_needs_reroute(&mut self) {
         self.needs_reroute = true;
     }
 
     /// Clears the needs reroute flag
+    #[allow(dead_code)] // Reserved for Router integration
     pub(crate) fn clear_needs_reroute(&mut self) {
         self.needs_reroute = false;
     }

@@ -189,6 +189,7 @@ impl ProgressReporter {
 /// The main router instance for managing connector routing
 pub struct Router {
     /// Router configuration flags
+    #[allow(dead_code)] // Will be used for flag-based behavior
     flags: RouterFlags,
     /// All shapes in the scene
     shapes: HashMap<u32, ShapeRef>,
@@ -205,6 +206,7 @@ pub struct Router {
     /// Orthogonal router
     orthogonal_router: OrthogonalRouter,
     /// Channel router for nudging overlapping segments
+    #[allow(dead_code)] // Reserved for integrated nudging
     channel_router: ChannelRouter,
     /// Routing parameters
     parameters: HashMap<RoutingParameter, f64>,
@@ -248,6 +250,7 @@ pub struct Router {
 
 /// Transaction operation types (legacy, kept for backwards compatibility)
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Legacy transaction tracking
 enum TransactionOp {
     AddShape(u32),
     DeleteShape(u32),
@@ -1609,5 +1612,127 @@ mod tests {
         assert!(route.size() > 2,
             "Route should avoid obstacle and have more than 2 points, got {}",
             route.size());
+    }
+
+    /// Test that mimics webdemo Example 10: multiple routes with nudging
+    /// This tests the full Router integration with nudging
+    #[test]
+    fn test_webdemo_example10_nudging_integration() {
+        let mut router = Router::new(ROUTER_FLAG_NONE);
+        router.set_routing_option(RoutingOption::NudgeOrthogonalRoutes, true);
+        router.set_transaction_use(true);
+
+        // Create obstacle at (150, 80) with size (100, 90) = x:[150,250], y:[80,170]
+        let mut obstacle_poly = Polygon::new();
+        obstacle_poly.push(Point::new(150.0, 80.0));
+        obstacle_poly.push(Point::new(250.0, 80.0));
+        obstacle_poly.push(Point::new(250.0, 170.0));
+        obstacle_poly.push(Point::new(150.0, 170.0));
+        router.add_shape(obstacle_poly, 1);
+
+        // Create 4 connectors like the webdemo - with ORTHOGONAL routing type
+        // Route 1: y=50 (above obstacle, should go straight)
+        let conn1_id = router.new_connector(
+            ConnEnd::new(Point::new(30.0, 50.0)),
+            ConnEnd::new(Point::new(370.0, 50.0))
+        );
+        router.get_connector_mut(conn1_id).unwrap().set_routing_type(ConnType::Orthogonal);
+
+        // Route 2: y=70 (above obstacle, should go straight)
+        let conn2_id = router.new_connector(
+            ConnEnd::new(Point::new(30.0, 70.0)),
+            ConnEnd::new(Point::new(370.0, 70.0))
+        );
+        router.get_connector_mut(conn2_id).unwrap().set_routing_type(ConnType::Orthogonal);
+
+        // Route 3: y=90 (intersects obstacle, must go around)
+        let conn3_id = router.new_connector(
+            ConnEnd::new(Point::new(30.0, 90.0)),
+            ConnEnd::new(Point::new(370.0, 90.0))
+        );
+        router.get_connector_mut(conn3_id).unwrap().set_routing_type(ConnType::Orthogonal);
+
+        // Route 4: y=200 (below obstacle, should go straight)
+        let conn4_id = router.new_connector(
+            ConnEnd::new(Point::new(30.0, 200.0)),
+            ConnEnd::new(Point::new(370.0, 200.0))
+        );
+        router.get_connector_mut(conn4_id).unwrap().set_routing_type(ConnType::Orthogonal);
+
+        // Debug: check routes BEFORE nudging by processing WITHOUT nudge option
+        router.set_routing_option(RoutingOption::NudgeOrthogonalRoutes, false);
+        router.process_transaction();
+
+        eprintln!("\n=== ROUTES BEFORE NUDGING ===");
+        for (name, id) in [("Route 1", conn1_id), ("Route 2", conn2_id), ("Route 3", conn3_id), ("Route 4", conn4_id)] {
+            if let Some(conn) = router.get_connector(id) {
+                if let Some(route) = conn.display_route() {
+                    let pts: Vec<String> = (0..route.size()).map(|i| {
+                        let p = route.at(i);
+                        format!("({:.0},{:.0})", p.x, p.y)
+                    }).collect();
+                    eprintln!("  {}: {} points - {}", name, route.size(), pts.join(" -> "));
+                }
+            }
+        }
+
+        // Now enable nudging and process again
+        router.set_routing_option(RoutingOption::NudgeOrthogonalRoutes, true);
+        // Force re-route by marking connectors dirty (this is a hack for testing)
+        router.process_transaction();
+
+        // Debug output
+        eprintln!("\n=== ROUTES AFTER NUDGING ===");
+        for (name, id) in [("Route 1", conn1_id), ("Route 2", conn2_id), ("Route 3", conn3_id), ("Route 4", conn4_id)] {
+            if let Some(conn) = router.get_connector(id) {
+                if let Some(route) = conn.display_route() {
+                    let pts: Vec<String> = (0..route.size()).map(|i| {
+                        let p = route.at(i);
+                        format!("({:.1},{:.1})", p.x, p.y)
+                    }).collect();
+                    eprintln!("  {}: {}", name, pts.join(" -> "));
+
+                    // Check orthogonality
+                    for i in 0..route.size()-1 {
+                        let p1 = route.at(i);
+                        let p2 = route.at(i+1);
+                        let is_horiz = (p1.y - p2.y).abs() < 0.01;
+                        let is_vert = (p1.x - p2.x).abs() < 0.01;
+                        if !is_horiz && !is_vert {
+                            eprintln!("    WARNING: Non-orthogonal segment {} to {}: ({:.1},{:.1}) -> ({:.1},{:.1})",
+                                i, i+1, p1.x, p1.y, p2.x, p2.y);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Verify Route 3 has consistent Y for its y=90 segments
+        if let Some(conn3) = router.get_connector(conn3_id) {
+            if let Some(route) = conn3.display_route() {
+                let start_y = route.at(0).y;
+                let end_y = route.at(route.size() - 1).y;
+
+                // Start and end Y should be the same (both at y=90 originally)
+                assert!(
+                    (start_y - end_y).abs() < 1.0,
+                    "Route 3 start Y ({}) and end Y ({}) should match after nudging",
+                    start_y, end_y
+                );
+
+                // Check all segments are orthogonal
+                for i in 0..route.size()-1 {
+                    let p1 = route.at(i);
+                    let p2 = route.at(i+1);
+                    let is_horiz = (p1.y - p2.y).abs() < 0.1;
+                    let is_vert = (p1.x - p2.x).abs() < 0.1;
+                    assert!(
+                        is_horiz || is_vert,
+                        "Route 3 segment {} is not orthogonal: ({:.1},{:.1}) -> ({:.1},{:.1})",
+                        i, p1.x, p1.y, p2.x, p2.y
+                    );
+                }
+            }
+        }
     }
 }

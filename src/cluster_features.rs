@@ -113,7 +113,7 @@ impl ClusterFeatures {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{Polygon, Rectangle};
+    use crate::geometry::Rectangle;
 
     #[test]
     fn test_line_segments_intersect() {

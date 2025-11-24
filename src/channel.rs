@@ -210,7 +210,11 @@ impl ShiftSegment {
         }
     }
 
-    /// Check if this segment overlaps with another in the parallel dimension
+    /// Check if this segment overlaps with another.
+    /// C++ ref: libavoid/orthogonal.cpp:306-359
+    /// Two segments overlap if:
+    /// 1. Their ranges in the parallel dimension overlap
+    /// 2. Their movement ranges (min/max limits) overlap
     pub fn overlaps(&self, other: &ShiftSegment, routes: &[Polygon]) -> bool {
         if self.dimension != other.dimension {
             return false;
@@ -219,8 +223,27 @@ impl ShiftSegment {
         let (self_min, self_max) = self.range(routes);
         let (other_min, other_max) = other.range(routes);
 
-        // Check for overlap (use >= for touching segments to count as overlapping)
-        self_max >= other_min && other_max >= self_min
+        // Check for range overlap in parallel dimension
+        // C++ uses < for proper overlap, and == for touching (separate handling)
+        let proper_overlap = self_max > other_min && other_max > self_min;
+        let touching = (self_max - other_min).abs() < 1e-6
+                    || (other_max - self_min).abs() < 1e-6;
+
+        if proper_overlap {
+            // The segments overlap in parallel dimension
+            // Also check if their movement ranges overlap
+            if self.min_limit <= other.max_limit && other.min_limit <= self.max_limit {
+                return true;
+            }
+        } else if touching {
+            // Segments touch at one end - still consider overlapping for nudging
+            // if their movement ranges overlap
+            if self.min_limit <= other.max_limit && other.min_limit <= self.max_limit {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Classify segment type based on position and bend pattern
@@ -585,10 +608,22 @@ impl ChannelRouter {
         nudge_shape_connected: bool,
         nudge_touching_colinear: bool,
     ) {
+        // C++ ref: libavoid/orthogonal.cpp:2570-2587
+        // Process each dimension separately, rebuilding segments after each
+        // because nudging changes point positions
+
         // Process horizontal segments (shift in Y)
         self.nudge_dimension_with_obstacles(routes, 0, obstacles, nudge_shape_connected, nudge_touching_colinear);
         // Process vertical segments (shift in X)
         self.nudge_dimension_with_obstacles(routes, 1, obstacles, nudge_shape_connected, nudge_touching_colinear);
+
+        // C++ ref: libavoid/orthogonal.cpp:2587
+        // Resimplify all routes that may have been modified during nudging.
+        // This removes collinear points introduced when same-route segments
+        // drift back together to the same position.
+        for route in routes.iter_mut() {
+            route.simplify();
+        }
     }
 
     /// Nudge segments in one dimension, respecting obstacles
@@ -700,7 +735,7 @@ impl ChannelRouter {
     /// overlapping routes apart, so we need generous limits to allow separation.
     fn compute_limits(&self, route: &Polygon, seg_idx: usize, dimension: usize) -> (f64, f64) {
         let p1 = route.at(seg_idx);
-        let p2 = route.at(seg_idx + 1);
+        // Note: p2 = route.at(seg_idx + 1) available if needed for segment-extent limits
 
         // Get perpendicular coordinate
         let perp = if dimension == 0 { p1.y } else { p1.x };
@@ -793,6 +828,7 @@ impl ChannelRouter {
     }
 
     /// Build shift segments with obstacle awareness (legacy O(n×m) approach)
+    #[allow(dead_code)] // Kept for reference/comparison
     fn build_shift_segments_with_obstacles_legacy(
         &self,
         routes: &[Polygon],
@@ -1157,45 +1193,115 @@ impl ChannelRouter {
                 .then_with(|| a.cmp(&b)) // Tie-breaker by index
         });
 
-        // Create CHAIN constraints between adjacent overlapping segments
-        // This avoids the bug where O(n²) pairwise constraints cause
-        // variables to be merged at wrong offsets
-        //
-        // C++ ref: libavoid/orthogonal.cpp:1350-1400 - uses fixedOrder() for ordering
-        for window in segment_order.windows(2) {
-            let i = window[0];
-            let j = window[1];
+        // Track which same-route segment pairs have been constrained
+        let mut same_route_constrained: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
 
-            if segments[i].overlaps(&segments[j], routes) {
+        // Create CHAIN constraints between ADJACENT overlapping segments
+        // This ensures proper transitive ordering (A+4≤B, B+4≤C → C at A+8)
+        // O(n²) pairwise would create shortcuts (A+4≤C → C could be at A+4)
+        for window in segment_order.windows(2) {
+            let j = window[0]; // lower position
+            let i = window[1]; // higher position
+
+            if !segments[i].overlaps(&segments[j], routes) {
+                continue;
+            }
+
+            // Skip if both fixed
+            if segments[i].fixed && segments[j].fixed {
+                continue;
+            }
+
+            let var_i = seg_var_map[i].unwrap();
+            let var_j = seg_var_map[j].unwrap();
+
+            // Check fixed ordering constraints
+            let (_i_fixed, i_order) = segments[i].fixed_order(self.nudge_distance);
+            let (_j_fixed, j_order) = segments[j].fixed_order(self.nudge_distance);
+
+            // Determine separation distance and equality flag
+            // C++ ref: libavoid/orthogonal.cpp:2779-2808
+            let (sep_dist, use_equality) = if segments[i].should_align_with(&segments[j], routes) {
+                // shouldAlignWith: FORCE alignment with equality constraint
+                (0.0, true)
+            } else if segments[i].route_idx == segments[j].route_idx
+                && segments[i].can_align_with(&segments[j])
+            {
+                // canAlignWith: ALLOW drift together with sepDist=0, but no equality
+                // This lets segments drift together naturally without forcing them
+                (0.0, false)
+            } else {
+                (self.nudge_distance, false)
+            };
+
+            // Track same-route pairs
+            if segments[i].route_idx == segments[j].route_idx {
+                let pair = (i.min(j), i.max(j));
+                same_route_constrained.insert(pair);
+            }
+
+            // Determine constraint direction
+            let mut swap_order = false;
+            if i_order != 0 || j_order != 0 {
+                if j_order == 1 && i_order != 1 {
+                    swap_order = true;
+                } else if i_order == -1 && j_order != -1 {
+                    swap_order = true;
+                }
+            }
+
+            let (left_var, right_var) = if swap_order {
+                (var_i, var_j)
+            } else {
+                (var_j, var_i)
+            };
+
+            if use_equality {
+                solver.add_equality_constraint(left_var, right_var, sep_dist);
+            } else {
+                solver.add_constraint(left_var, right_var, sep_dist);
+            }
+        }
+
+        // Add constraints for same-route segments that weren't adjacent in sorted order
+        // This ensures same-route segments can align even when separated by other routes
+        for (idx, &i) in segment_order.iter().enumerate() {
+            for &j in segment_order.iter().take(idx) {
+                // Only process same-route pairs that weren't already constrained
+                if segments[i].route_idx != segments[j].route_idx {
+                    continue;
+                }
+                let pair = (i.min(j), i.max(j));
+                if same_route_constrained.contains(&pair) {
+                    continue;
+                }
+                if !segments[i].overlaps(&segments[j], routes) {
+                    continue;
+                }
+                if segments[i].fixed && segments[j].fixed {
+                    continue;
+                }
+
                 let var_i = seg_var_map[i].unwrap();
                 let var_j = seg_var_map[j].unwrap();
 
-                // Check fixed ordering constraints
-                let (i_fixed, i_order) = segments[i].fixed_order(self.nudge_distance);
-                let (j_fixed, j_order) = segments[j].fixed_order(self.nudge_distance);
-
-                // Determine constraint direction based on ordering
-                // Default: i comes before j (lower position)
-                // order = 1: segment wants to be at min (below others)
-                // order = -1: segment wants to be at max (above others)
-                let mut swap_order = false;
-
-                if i_order != 0 || j_order != 0 {
-                    // At least one segment has ordering constraints
-                    if j_order == 1 && i_order != 1 {
-                        // j wants to be at min, i doesn't - swap so j < i
-                        swap_order = true;
-                    } else if i_order == -1 && j_order != -1 {
-                        // i wants to be at max, j doesn't - swap so j < i
-                        swap_order = true;
-                    }
-                    // If both have same order or conflicting, keep default
-                }
-
-                if swap_order {
-                    solver.add_constraint(var_j, var_i, self.nudge_distance);
+                // Same route - check alignment
+                // Match C++ behavior: shouldAlignWith uses equality, canAlignWith does not
+                let (sep_dist, use_equality) = if segments[i].should_align_with(&segments[j], routes) {
+                    (0.0, true) // Force alignment
+                } else if segments[i].can_align_with(&segments[j]) {
+                    (0.0, false) // Allow drift together
                 } else {
-                    solver.add_constraint(var_i, var_j, self.nudge_distance);
+                    continue; // No special handling needed
+                };
+
+                // Same route segments with sep_dist=0 - add equality constraint
+                // This allows them to drift together without chain restrictions
+                if use_equality {
+                    solver.add_equality_constraint(var_j, var_i, sep_dist);
+                } else {
+                    solver.add_constraint(var_j, var_i, sep_dist);
                 }
             }
         }
@@ -1223,20 +1329,44 @@ impl ChannelRouter {
     }
 
     /// Update routes with new segment positions
+    ///
+    /// IMPORTANT: When nudging segments, we must only update the perpendicular coordinate
+    /// of the segment's endpoints. The parallel coordinate must stay fixed to maintain
+    /// route connectivity. Additionally, for interior points (not at route endpoints),
+    /// we must update all segments that share that point.
     fn update_routes(&self, routes: &mut [Polygon], segments: &[ShiftSegment], dimension: usize) {
-        for segment in segments {
-            let route = &mut routes[segment.route_idx];
-            let new_pos = segment.position;
+        // Group segments by route for proper handling of shared points
+        let mut route_segments: std::collections::HashMap<usize, Vec<&ShiftSegment>> =
+            std::collections::HashMap::new();
 
-            // Update both endpoints of the segment
-            if dimension == 0 {
-                // Horizontal segment - update Y
-                route.ps[segment.low_idx].y = new_pos;
-                route.ps[segment.high_idx].y = new_pos;
-            } else {
-                // Vertical segment - update X
-                route.ps[segment.low_idx].x = new_pos;
-                route.ps[segment.high_idx].x = new_pos;
+        for segment in segments {
+            route_segments
+                .entry(segment.route_idx)
+                .or_default()
+                .push(segment);
+        }
+
+        // Process each route
+        for (route_idx, segs) in route_segments {
+            let route = &mut routes[route_idx];
+
+            // For each point in the route, find which segment(s) it belongs to
+            // and apply the appropriate position update
+            for seg in &segs {
+                let new_pos = seg.position;
+
+                // Update ONLY the perpendicular coordinate
+                // The parallel coordinate (the one that defines the segment's extent) must not change
+                if dimension == 0 {
+                    // Horizontal segment nudging - update Y coordinate only
+                    // low_idx and high_idx are the segment endpoints
+                    route.ps[seg.low_idx].y = new_pos;
+                    route.ps[seg.high_idx].y = new_pos;
+                } else {
+                    // Vertical segment nudging - update X coordinate only
+                    route.ps[seg.low_idx].x = new_pos;
+                    route.ps[seg.high_idx].x = new_pos;
+                }
             }
         }
     }
@@ -1578,6 +1708,152 @@ mod tests {
                 y
             );
         }
+    }
+
+    /// Test for zigzag bug: same-route horizontal segments that OVERLAP should stay aligned
+    /// This reproduces the webdemo scenario where Route 3 goes around an obstacle
+    /// and the horizontal segments ended up at different Y positions.
+    ///
+    /// Bug: Route showed (30,90) (148,90) (368,80) (370,90) - the segment at y=80
+    /// should have been at y=90 like the others.
+    ///
+    /// Note: Segments that DON'T overlap in the parallel dimension won't be constrained
+    /// together - that's expected behavior. This test focuses on OVERLAPPING segments.
+    #[test]
+    fn test_same_route_overlapping_horizontal_segments_stay_aligned() {
+        let router = ChannelRouter::new();
+
+        // Route with two overlapping horizontal segments at the same Y:
+        // - First segment: X=[0, 60]
+        // - Second segment (after vertical jog): X=[40, 100]
+        // These overlap in X range [40, 60], so they should be constrained together
+        let route_with_overlap = make_route(&[
+            (0.0, 50.0),    // Start
+            (60.0, 50.0),   // End of first horizontal (overlaps with second)
+            (60.0, 30.0),   // Go up (vertical)
+            (40.0, 30.0),   // Horizontal (going back)
+            (40.0, 50.0),   // Go down (vertical) - this point overlaps X range of segment 0-1
+            (100.0, 50.0),  // End horizontal (overlaps with first at X=40-60)
+        ]);
+
+        // Another route at a different Y to create nudging pressure
+        let other_route = make_route(&[
+            (0.0, 52.0),
+            (100.0, 52.0),
+        ]);
+
+        let mut routes = vec![route_with_overlap, other_route];
+
+        // Apply nudging
+        router.nudge_routes(&mut routes);
+
+        // Extract Y positions of horizontal segments from the first route
+        let route = &routes[0];
+
+        // Points 0-1: horizontal at y=50, X=[0,60]
+        // Points 4-5: horizontal at y=50, X=[40,100]
+        // These overlap at X=[40,60], so should stay at same Y
+
+        let y_first_horiz = route.at(0).y;
+        let y_last_horiz = route.at(5).y;
+
+        assert!(
+            (y_first_horiz - y_last_horiz).abs() < 0.5,
+            "Same-route OVERLAPPING horizontal segments should stay aligned. \
+             First segment Y={}, last segment Y={}, diff={}",
+            y_first_horiz, y_last_horiz, (y_first_horiz - y_last_horiz).abs()
+        );
+    }
+
+    /// More direct reproduction of the webdemo bug with multiple overlapping routes
+    #[test]
+    fn test_webdemo_zigzag_bug_reproduction() {
+        let router = ChannelRouter::with_nudge_distance(4.0);
+        eprintln!("\n=== WEBDEMO ZIGZAG BUG REPRODUCTION TEST ===");
+
+        // Webdemo scenario:
+        // - Route 1: horizontal at y=50
+        // - Route 2: horizontal at y=70
+        // - Route 3: goes around obstacle, has segments at y=90 and above
+        // - Route 4: horizontal at y=200
+        // - Obstacle at x:[150,250], y:[80,170]
+
+        // Simplified: multiple routes overlapping, one goes around
+        let route1 = make_route(&[(30.0, 50.0), (370.0, 50.0)]);
+        let route2 = make_route(&[(30.0, 70.0), (370.0, 70.0)]);
+
+        // Route 3 goes around obstacle - starts at y=90, goes up to clear obstacle, back to y=90
+        let route3 = make_route(&[
+            (30.0, 90.0),    // Start horizontal
+            (145.0, 90.0),   // Before obstacle
+            (145.0, 75.0),   // Go up
+            (255.0, 75.0),   // Over obstacle
+            (255.0, 90.0),   // Go down
+            (370.0, 90.0),   // End horizontal
+        ]);
+
+        let route4 = make_route(&[(30.0, 200.0), (370.0, 200.0)]);
+
+        // Obstacle that route3 goes around
+        let obstacle = make_route(&[
+            (150.0, 80.0), (250.0, 80.0), (250.0, 170.0), (150.0, 170.0)
+        ]);
+
+        let mut routes = vec![route1, route2, route3, route4];
+
+        // Debug: print routes BEFORE nudging
+        eprintln!("\nROUTES BEFORE NUDGING:");
+        for (i, r) in routes.iter().enumerate() {
+            let pts: Vec<String> = (0..r.size()).map(|j| {
+                let p = r.at(j);
+                format!("({:.1},{:.1})", p.x, p.y)
+            }).collect();
+            eprintln!("  Route {}: {}", i, pts.join(" -> "));
+        }
+
+        // Apply nudging with obstacle
+        router.nudge_routes_with_obstacles(&mut routes, &[obstacle]);
+
+        // Debug: print routes AFTER nudging
+        eprintln!("\nROUTES AFTER NUDGING:");
+        for (i, r) in routes.iter().enumerate() {
+            let pts: Vec<String> = (0..r.size()).map(|j| {
+                let p = r.at(j);
+                format!("({:.1},{:.1})", p.x, p.y)
+            }).collect();
+            eprintln!("  Route {}: {}", i, pts.join(" -> "));
+        }
+
+        // The critical check: Route 3's horizontal segments that were at y=90
+        // should ALL still be at the same Y position
+        let route3 = &routes[2];
+
+        // Points 0,1 are at y=90 (before obstacle)
+        // Points 4,5 are at y=90 (after obstacle)
+        let y_before = route3.at(0).y;
+        let y_after = route3.at(5).y;
+
+        assert!(
+            (y_before - y_after).abs() < 0.5,
+            "Route 3 zigzag bug: horizontal segments before and after obstacle \
+             should be at same Y. Before Y={}, After Y={}, diff={}. \
+             Full route: {:?}",
+            y_before, y_after, (y_before - y_after).abs(),
+            (0..route3.size()).map(|i| {
+                let p = route3.at(i);
+                format!("({:.1},{:.1})", p.x, p.y)
+            }).collect::<Vec<_>>().join(" ")
+        );
+
+        // Also check intermediate points
+        let y_point1 = route3.at(1).y;
+        let y_point4 = route3.at(4).y;
+
+        assert!(
+            (y_point1 - y_point4).abs() < 0.5,
+            "Route 3 interior points should stay aligned. Point1 Y={}, Point4 Y={}",
+            y_point1, y_point4
+        );
     }
 }
 

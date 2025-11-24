@@ -32,6 +32,7 @@ pub const VIS_DIR_DOWN: ScanVisDirFlags = 2;
 
 /// Convert scanline visibility directions to connector direction flags.
 /// Used when generating edges to determine allowed routing directions.
+#[allow(dead_code)] // Reserved for direction-constrained routing
 fn scan_vis_to_conn_dir(scan_dirs: ScanVisDirFlags, is_horizontal: bool) -> ConnDirFlags {
     let mut result = 0;
     if is_horizontal {

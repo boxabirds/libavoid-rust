@@ -1,0 +1,1 @@
+- Every time user identifies a bug or issue, a test should be first created that reproduces it. Then to fix the issue all you need to do is debug the broken test.
