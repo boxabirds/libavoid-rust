@@ -6,7 +6,7 @@
 //!
 //! Ported from libavoid orthogonal.cpp
 
-use crate::geometry::{Polygon, PolygonInterface};
+use crate::geometry::{Polygon, PolygonInterface, Point};
 use crate::vpsc::IncSolver;
 
 // ============================================================================
@@ -156,16 +156,21 @@ impl ChannelRouter {
 
     /// Nudge routes to spread overlapping segments
     pub fn nudge_routes(&self, routes: &mut [Polygon]) {
-        // Process horizontal segments (shift in Y)
-        self.nudge_dimension(routes, 0);
-        // Process vertical segments (shift in X)
-        self.nudge_dimension(routes, 1);
+        self.nudge_routes_with_obstacles(routes, &[]);
     }
 
-    /// Nudge segments in one dimension
-    fn nudge_dimension(&self, routes: &mut [Polygon], dimension: usize) {
-        // Build shift segments
-        let mut segments = self.build_shift_segments(routes, dimension);
+    /// Nudge routes to spread overlapping segments, respecting obstacles
+    pub fn nudge_routes_with_obstacles(&self, routes: &mut [Polygon], obstacles: &[Polygon]) {
+        // Process horizontal segments (shift in Y)
+        self.nudge_dimension_with_obstacles(routes, 0, obstacles);
+        // Process vertical segments (shift in X)
+        self.nudge_dimension_with_obstacles(routes, 1, obstacles);
+    }
+
+    /// Nudge segments in one dimension, respecting obstacles
+    fn nudge_dimension_with_obstacles(&self, routes: &mut [Polygon], dimension: usize, obstacles: &[Polygon]) {
+        // Build shift segments with obstacle-aware limits
+        let mut segments = self.build_shift_segments_with_obstacles(routes, dimension, obstacles);
 
         if segments.is_empty() {
             return;
@@ -258,6 +263,107 @@ impl ChannelRouter {
         }
 
         (min_limit, max_limit)
+    }
+
+    /// Build shift segments with obstacle awareness
+    fn build_shift_segments_with_obstacles(
+        &self,
+        routes: &[Polygon],
+        dimension: usize,
+        obstacles: &[Polygon],
+    ) -> Vec<ShiftSegment> {
+        let mut segments = Vec::new();
+
+        // Precompute obstacle bounding boxes
+        let obstacle_bounds: Vec<(f64, f64, f64, f64)> = obstacles
+            .iter()
+            .map(|obs| Self::polygon_bounds(obs))
+            .collect();
+
+        for (route_idx, route) in routes.iter().enumerate() {
+            if route.size() < 2 {
+                continue;
+            }
+
+            for i in 0..route.size() - 1 {
+                let p1 = route.at(i);
+                let p2 = route.at(i + 1);
+
+                let is_horizontal = (p1.y - p2.y).abs() < 1e-6;
+                let is_vertical = (p1.x - p2.x).abs() < 1e-6;
+
+                // Dimension 0: horizontal segments (can shift in Y)
+                // Dimension 1: vertical segments (can shift in X)
+                if (dimension == 0 && is_horizontal) || (dimension == 1 && is_vertical) {
+                    let position = if dimension == 0 { p1.y } else { p1.x };
+
+                    // Compute base limits from route structure
+                    let (mut min_limit, mut max_limit) = self.compute_limits(route, i, dimension);
+
+                    // Constrain by obstacles
+                    let seg_min_par = if dimension == 0 { p1.x.min(p2.x) } else { p1.y.min(p2.y) };
+                    let seg_max_par = if dimension == 0 { p1.x.max(p2.x) } else { p1.y.max(p2.y) };
+
+                    for &(obs_min_x, obs_min_y, obs_max_x, obs_max_y) in &obstacle_bounds {
+                        // Check if segment overlaps obstacle in parallel dimension
+                        let (obs_min_par, obs_max_par, obs_min_perp, obs_max_perp) = if dimension == 0 {
+                            (obs_min_x, obs_max_x, obs_min_y, obs_max_y)
+                        } else {
+                            (obs_min_y, obs_max_y, obs_min_x, obs_max_x)
+                        };
+
+                        // If segment's parallel range overlaps obstacle's parallel range
+                        if seg_max_par > obs_min_par && seg_min_par < obs_max_par {
+                            // Obstacle constrains movement in perpendicular direction
+                            if position < obs_min_perp {
+                                // Segment is below/left of obstacle - can't move past obstacle's min
+                                max_limit = max_limit.min(obs_min_perp - self.nudge_distance);
+                            } else if position > obs_max_perp {
+                                // Segment is above/right of obstacle - can't move past obstacle's max
+                                min_limit = min_limit.max(obs_max_perp + self.nudge_distance);
+                            }
+                            // If segment is inside obstacle... it shouldn't move at all
+                            // (but this case shouldn't happen with proper routing)
+                        }
+                    }
+
+                    let segment = if min_limit >= max_limit {
+                        ShiftSegment::fixed(route_idx, i, i + 1, dimension, position)
+                    } else {
+                        ShiftSegment::new(
+                            route_idx, i, i + 1, dimension, position, min_limit, max_limit,
+                        )
+                    };
+
+                    segments.push(segment);
+                }
+            }
+        }
+
+        segments
+    }
+
+    /// Compute bounding box of a polygon
+    fn polygon_bounds(poly: &Polygon) -> (f64, f64, f64, f64) {
+        if poly.size() == 0 {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+
+        let first = poly.at(0);
+        let mut min_x = first.x;
+        let mut min_y = first.y;
+        let mut max_x = first.x;
+        let mut max_y = first.y;
+
+        for i in 1..poly.size() {
+            let p = poly.at(i);
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+
+        (min_x, min_y, max_x, max_y)
     }
 
     /// Build VPSC problem from segments

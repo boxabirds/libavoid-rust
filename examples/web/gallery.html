@@ -300,6 +300,30 @@
       </div>
     </div>
 
+    <!-- 9. Route Nudging -->
+    <div class="example-card">
+      <div class="example-header">
+        <h2>9. Route Nudging <span class="badge badge-advanced">Advanced</span></h2>
+        <p>VPSC-based separation of overlapping routes</p>
+      </div>
+      <div class="example-content">
+        <div class="canvas-container">
+          <svg id="canvas-nudging" viewBox="0 0 400 250"></svg>
+        </div>
+        <div class="controls">
+          <button onclick="examples.nudging.run()">Run Example</button>
+          <button onclick="examples.nudging.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-nudging">Click "Run Example" to see route nudging</div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-color" style="background:#ef4444"></div> Obstacle</div>
+          <div class="legend-item"><div class="legend-color" style="background:#3b82f6"></div> Route 1</div>
+          <div class="legend-item"><div class="legend-color" style="background:#10b981"></div> Route 2</div>
+          <div class="legend-item"><div class="legend-color" style="background:#8b5cf6"></div> Route 3</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script type="module" src="gallery.js"></script>

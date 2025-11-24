@@ -106,19 +106,67 @@ impl OrthogonalRouter {
         end: Point,
         obstacles: &[&dyn Obstacle],
     ) -> Polygon {
-        // Simple orthogonal routing: try horizontal-then-vertical and vertical-then-horizontal
-        let path1 = self.route_h_v(start, end, obstacles);
-        let path2 = self.route_v_h(start, end, obstacles);
+        // Try simple L-shaped paths first
+        let path1 = self.route_h_v_simple(start, end, obstacles);
+        let path2 = self.route_v_h_simple(start, end, obstacles);
 
-        // Return the path with lower cost
-        let cost1 = self.compute_path_cost(&path1);
-        let cost2 = self.compute_path_cost(&path2);
-
-        if cost1 <= cost2 {
-            path1
-        } else {
-            path2
+        match (path1, path2) {
+            (Some(p1), Some(p2)) => {
+                // Both valid - return the one with lower cost
+                let cost1 = self.compute_path_cost(&p1);
+                let cost2 = self.compute_path_cost(&p2);
+                if cost1 <= cost2 { p1 } else { p2 }
+            }
+            (Some(p1), None) => p1,
+            (None, Some(p2)) => p2,
+            (None, None) => {
+                // Both simple paths blocked - use A* router
+                let astar = OrthogonalAStarRouter::new();
+                astar.route_astar(start, end, obstacles)
+            }
         }
+    }
+
+    /// Try simple horizontal-then-vertical route, returns None if blocked
+    fn route_h_v_simple(&self, start: Point, end: Point, obstacles: &[&dyn Obstacle]) -> Option<Polygon> {
+        let mid = Point::new(end.x, start.y);
+
+        // Check if both segments are clear
+        if !self.is_path_clear(&start, &mid, obstacles) {
+            return None;
+        }
+        if !self.is_path_clear(&mid, &end, obstacles) {
+            return None;
+        }
+
+        let mut poly = Polygon::with_capacity(3);
+        poly.push(start);
+        if (start.x - end.x).abs() > 1e-6 {
+            poly.push(mid);
+        }
+        poly.push(end);
+        Some(poly)
+    }
+
+    /// Try simple vertical-then-horizontal route, returns None if blocked
+    fn route_v_h_simple(&self, start: Point, end: Point, obstacles: &[&dyn Obstacle]) -> Option<Polygon> {
+        let mid = Point::new(start.x, end.y);
+
+        // Check if both segments are clear
+        if !self.is_path_clear(&start, &mid, obstacles) {
+            return None;
+        }
+        if !self.is_path_clear(&mid, &end, obstacles) {
+            return None;
+        }
+
+        let mut poly = Polygon::with_capacity(3);
+        poly.push(start);
+        if (start.y - end.y).abs() > 1e-6 {
+            poly.push(mid);
+        }
+        poly.push(end);
+        Some(poly)
     }
 
     /// Routes horizontal-then-vertical

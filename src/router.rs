@@ -11,7 +11,9 @@ use crate::obstacle::Obstacle;
 use crate::visibility::VisibilityGraph;
 use crate::graph::PathFinder;
 use crate::orthogonal::OrthogonalRouter;
+use crate::channel::ChannelRouter;
 use crate::action::{ActionInfo, ActionType};
+use crate::orthogonal_visgraph::{OrthogonalVisGraphGenerator, ObstacleInput, ConnectorInput};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Router flags for initialization
@@ -77,6 +79,8 @@ pub struct Router {
     path_finder: PathFinder,
     /// Orthogonal router
     orthogonal_router: OrthogonalRouter,
+    /// Channel router for nudging overlapping segments
+    channel_router: ChannelRouter,
     /// Routing parameters
     parameters: HashMap<RoutingParameter, f64>,
     /// Routing options
@@ -128,6 +132,7 @@ impl Router {
             vis_orth_graph: VisibilityGraph::new(),
             path_finder: PathFinder::new(),
             orthogonal_router: OrthogonalRouter::new(),
+            channel_router: ChannelRouter::new(),
             parameters: HashMap::new(),
             options: HashMap::new(),
             transaction_mode: (flags & ROUTER_FLAG_USE_TRANSACTIONS) != 0,
@@ -611,13 +616,75 @@ impl Router {
         route
     }
 
-    /// Routes using orthogonal segments
+    /// Routes using orthogonal segments via visibility graph
     fn route_orthogonal(&mut self, src: Point, dst: Point) -> Polygon {
-        let obstacles: Vec<&dyn Obstacle> = self.shapes.values()
-            .map(|s| s as &dyn Obstacle)
+        // Build obstacle inputs
+        let obstacles: Vec<ObstacleInput> = self.shapes.iter()
+            .filter(|(_, shape)| shape.is_active())
+            .map(|(id, shape)| ObstacleInput {
+                id: *id,
+                polygon: shape.polygon().clone(),
+            })
             .collect();
 
-        self.orthogonal_router.route_orthogonal(src, dst, &obstacles)
+        // If no obstacles, return direct L-shaped path
+        if obstacles.is_empty() {
+            return self.simple_orthogonal_path(src, dst);
+        }
+
+        // Create connector input for this route
+        let connectors = vec![ConnectorInput {
+            id: 0,
+            start: src,
+            end: dst,
+        }];
+
+        // Generate orthogonal visibility graph
+        let generator = OrthogonalVisGraphGenerator::new();
+        let ortho_graph = generator.generate(&obstacles, &connectors);
+
+        // Find start and end vertices in the graph
+        let start_vertex = ortho_graph.vertices()
+            .find(|v| (v.point.x - src.x).abs() < 1e-6 && (v.point.y - src.y).abs() < 1e-6);
+        let end_vertex = ortho_graph.vertices()
+            .find(|v| (v.point.x - dst.x).abs() < 1e-6 && (v.point.y - dst.y).abs() < 1e-6);
+
+        match (start_vertex, end_vertex) {
+            (Some(start_v), Some(end_v)) => {
+                // Use pathfinder to find route through visibility graph
+                if let Some(path_ids) = self.path_finder.find_path(&ortho_graph, start_v.id, end_v.id) {
+                    // Convert path IDs to points
+                    let mut route = Polygon::with_capacity(path_ids.len());
+                    for id in path_ids {
+                        if let Some(vertex) = ortho_graph.get_vertex(id) {
+                            route.push(vertex.point);
+                        }
+                    }
+                    if route.size() >= 2 {
+                        return route;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Fallback to old orthogonal router if visgraph approach fails
+        let obs_refs: Vec<&dyn Obstacle> = self.shapes.values()
+            .map(|s| s as &dyn Obstacle)
+            .collect();
+        self.orthogonal_router.route_orthogonal(src, dst, &obs_refs)
+    }
+
+    /// Simple L-shaped orthogonal path (no obstacles)
+    fn simple_orthogonal_path(&self, src: Point, dst: Point) -> Polygon {
+        let mut route = Polygon::with_capacity(3);
+        route.push(src);
+        // Horizontal first, then vertical
+        if (src.x - dst.x).abs() > 1e-6 {
+            route.push(Point::new(dst.x, src.y));
+        }
+        route.push(dst);
+        route
     }
 
     /// Checks if a direct path is clear of all obstacles.
@@ -698,6 +765,52 @@ impl Router {
         let conn_ids: Vec<u32> = self.connectors.keys().copied().collect();
         for conn_id in conn_ids {
             self.route_connector(conn_id);
+        }
+
+        // Apply nudging to orthogonal routes if enabled
+        if self.options.get(&RoutingOption::NudgeOrthogonalRoutes).copied().unwrap_or(false) {
+            self.nudge_orthogonal_routes();
+        }
+    }
+
+    /// Nudges orthogonal routes to prevent overlap
+    fn nudge_orthogonal_routes(&mut self) {
+        // Collect orthogonal connectors with valid routes
+        let orthogonal_conn_ids: Vec<u32> = self.connectors
+            .iter()
+            .filter(|(_, conn)| conn.routing_type() == ConnType::Orthogonal && conn.route().is_some())
+            .map(|(id, _)| *id)
+            .collect();
+
+        if orthogonal_conn_ids.is_empty() {
+            return;
+        }
+
+        // Extract routes as polygons
+        let mut routes: Vec<Polygon> = orthogonal_conn_ids
+            .iter()
+            .filter_map(|id| self.connectors.get(id))
+            .filter_map(|conn| conn.route().cloned())
+            .collect();
+
+        if routes.is_empty() {
+            return;
+        }
+
+        // Collect obstacle polygons
+        let obstacles: Vec<Polygon> = self.shapes
+            .values()
+            .map(|shape| shape.polygon().clone())
+            .collect();
+
+        // Apply channel-based nudging with obstacle awareness
+        self.channel_router.nudge_routes_with_obstacles(&mut routes, &obstacles);
+
+        // Update connector routes with nudged positions
+        for (i, conn_id) in orthogonal_conn_ids.iter().enumerate() {
+            if let Some(conn) = self.connectors.get_mut(conn_id) {
+                conn.set_route(routes[i].clone());
+            }
         }
     }
 

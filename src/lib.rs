@@ -54,6 +54,7 @@ pub mod hyperedge;
 pub mod cluster;
 pub mod vpsc;
 pub mod channel;
+pub mod orthogonal_visgraph;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;

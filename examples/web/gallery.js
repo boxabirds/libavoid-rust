@@ -949,6 +949,87 @@ window.examples.interactive = {
 };
 
 // ============================================================================
+// Example 9: Route Nudging (Overlap Prevention)
+// ============================================================================
+
+window.examples.nudging = {
+  run: function() {
+    clearSvg('canvas-nudging');
+    clearLog('output-nudging');
+
+    log('output-nudging', 'Demonstrating route nudging to prevent overlap...\n');
+
+    // Create router with orthogonal routing
+    const router = new Router(ORTHOGONAL_ROUTING);
+
+    // Enable route nudging (option 0 = NudgeOrthogonalRoutes)
+    router.setRoutingOption(0, true);
+
+    // Create a simple obstacle
+    const obstaclePoly = createRectPolygon(150, 80, 100, 90);
+    const obstacle = new ShapeRef(router, obstaclePoly);
+    router.addShape(obstacle);
+
+    // Create multiple connectors that will have overlapping paths
+    const connectorDefs = [
+      { src: { x: 30, y: 50 }, dst: { x: 370, y: 50 }, color: '#3b82f6', name: 'Route 1' },
+      { src: { x: 30, y: 70 }, dst: { x: 370, y: 70 }, color: '#10b981', name: 'Route 2' },
+      { src: { x: 30, y: 90 }, dst: { x: 370, y: 90 }, color: '#8b5cf6', name: 'Route 3' },
+      { src: { x: 30, y: 200 }, dst: { x: 370, y: 200 }, color: '#f59e0b', name: 'Route 4' },
+    ];
+
+    const connectors = [];
+
+    // Add connectors
+    connectorDefs.forEach((def, i) => {
+      const conn = ConnRef.createWithEndpoints(router,
+        new ConnEnd(new Point(def.src.x, def.src.y)),
+        new ConnEnd(new Point(def.dst.x, def.dst.y)));
+      conn.setRoutingType(ORTHOGONAL_ROUTING);
+      router.addConnector(conn);
+      connectors.push({ conn, def });
+
+      log('output-nudging', `${def.name}: (${def.src.x},${def.src.y}) → (${def.dst.x},${def.dst.y})`);
+    });
+
+    router.processTransaction();
+
+    // Draw obstacle
+    drawRect('canvas-nudging', 150, 80, 100, 90, COLORS.obstacleFill, COLORS.obstacle);
+
+    // Draw routes
+    log('output-nudging', '\nRoutes after nudging:');
+    connectors.forEach(({ conn, def }) => {
+      drawPoint('canvas-nudging', def.src.x, def.src.y, 5, def.color);
+      drawPoint('canvas-nudging', def.dst.x, def.dst.y, 5, def.color);
+
+      const route = router.getConnectorRoute(conn.id());
+      if (route && route.size() > 0) {
+        drawRoute('canvas-nudging', route, def.color, 2);
+
+        // Log route points
+        let routeStr = `  ${def.name}: `;
+        for (let i = 0; i < Math.min(route.size(), 4); i++) {
+          const pt = route.at(i);
+          if (pt) routeStr += `(${pt.x.toFixed(0)},${pt.y.toFixed(0)}) `;
+        }
+        if (route.size() > 4) routeStr += '...';
+        log('output-nudging', routeStr);
+      }
+    });
+
+    log('output-nudging', '\n✓ Overlapping segments are nudged apart');
+    log('output-nudging', '  using VPSC constraint satisfaction');
+  },
+
+  reset: function() {
+    clearSvg('canvas-nudging');
+    clearLog('output-nudging');
+    log('output-nudging', 'Click "Run Example" to see route nudging');
+  }
+};
+
+// ============================================================================
 // Initialize on WASM load
 // ============================================================================
 
