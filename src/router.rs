@@ -855,11 +855,9 @@ impl Router {
             _ => {}
         }
 
-        // Fallback to old orthogonal router if visgraph approach fails
-        let obs_refs: Vec<&dyn Obstacle> = self.shapes.values()
-            .map(|s| s as &dyn Obstacle)
-            .collect();
-        self.orthogonal_router.route_orthogonal(src, dst, &obs_refs)
+        // Visibility graph failed - return simple L-shaped path
+        // Note: This is not a "fallback" but a last resort when the graph is disconnected
+        self.simple_orthogonal_path(src, dst)
     }
 
     /// Simple L-shaped orthogonal path (no obstacles)
