@@ -348,6 +348,8 @@ pub struct VisibilityGraph {
     next_edge_id: EdgeId,
     /// Current search generation (incremented each search)
     search_generation: u32,
+    /// Dirty edges that need recomputation (Task #21)
+    dirty_edges: HashSet<(VertexId, VertexId)>,
 }
 
 impl VisibilityGraph {
@@ -358,6 +360,7 @@ impl VisibilityGraph {
             next_vertex_id: 1,
             next_edge_id: 1,
             search_generation: 0,
+            dirty_edges: HashSet::new(),
         }
     }
 
@@ -934,6 +937,133 @@ fn compute_direction(p1: &Point, p2: &Point) -> Direction {
             Direction::Left
         }
     }
+}
+
+// ============================================================================
+// Dirty Edge Tracking (Task #21)
+// ============================================================================
+
+impl VisibilityGraph {
+    /// Mark an edge as dirty (needing recomputation)
+    pub fn mark_edge_dirty(&mut self, v1: VertexId, v2: VertexId) {
+        let key = if v1 < v2 { (v1, v2) } else { (v2, v1) };
+        self.dirty_edges.insert(key);
+    }
+
+    /// Mark all edges crossing an obstacle as dirty
+    pub fn mark_edges_crossing_obstacle_dirty(&mut self, obstacle: &Polygon) {
+        let vertices: Vec<(VertexId, Point)> = self
+            .vertices
+            .iter()
+            .map(|(id, v)| (*id, v.point))
+            .collect();
+
+        for i in 0..vertices.len() {
+            for j in (i + 1)..vertices.len() {
+                let (v1_id, v1_point) = vertices[i];
+                let (v2_id, v2_point) = vertices[j];
+
+                if edge_intersects_polygon(&v1_point, &v2_point, obstacle) {
+                    self.mark_edge_dirty(v1_id, v2_id);
+                }
+            }
+        }
+    }
+
+    /// Clear all dirty edges
+    pub fn clear_dirty_edges(&mut self) {
+        self.dirty_edges.clear();
+    }
+
+    /// Get count of dirty edges
+    pub fn dirty_edge_count(&self) -> usize {
+        self.dirty_edges.len()
+    }
+
+    /// Recompute only dirty edges (Task #21)
+    pub fn recompute_dirty_edges(&mut self, obstacles: &[Polygon]) {
+        let edges_to_check: Vec<(VertexId, VertexId)> =
+            self.dirty_edges.iter().copied().collect();
+
+        for (v1_id, v2_id) in edges_to_check {
+            // Get vertex points
+            let v1_point = if let Some(v) = self.get_vertex(v1_id) {
+                v.point
+            } else {
+                continue;
+            };
+
+            let v2_point = if let Some(v) = self.get_vertex(v2_id) {
+                v.point
+            } else {
+                continue;
+            };
+
+            // Check if edge is still valid (not blocked by obstacles)
+            let mut blocked = false;
+            for obstacle in obstacles {
+                if segment_intersects_polygon_interior(&v1_point, &v2_point, obstacle) {
+                    blocked = true;
+                    break;
+                }
+            }
+
+            // Update edge existence based on blockage
+            // (This is simplified - full implementation would update edge data structures)
+            if blocked {
+                // Edge should be removed if it exists
+                self.remove_edge_if_exists(v1_id, v2_id);
+            } else {
+                // Edge should exist if it doesn't
+                // (Only add if both vertices exist and edge doesn't exist)
+                self.add_edge_if_not_exists(v1_id, v2_id);
+            }
+        }
+
+        // Clear dirty edges after recomputation
+        self.clear_dirty_edges();
+    }
+
+    /// Helper: Remove edge if it exists
+    fn remove_edge_if_exists(&mut self, v1: VertexId, v2: VertexId) {
+        if let Some(vertex) = self.vertices.get_mut(&v1) {
+            vertex.edges.retain(|e| e.target_id != v2);
+            vertex.orthogonal_edges.retain(|e| e.target_id != v2);
+        }
+        if let Some(vertex) = self.vertices.get_mut(&v2) {
+            vertex.edges.retain(|e| e.target_id != v1);
+            vertex.orthogonal_edges.retain(|e| e.target_id != v1);
+        }
+    }
+
+    /// Helper: Add edge if it doesn't exist
+    fn add_edge_if_not_exists(&mut self, v1: VertexId, v2: VertexId) {
+        // Check if vertices exist
+        let (v1_exists, v2_exists) = (
+            self.vertices.contains_key(&v1),
+            self.vertices.contains_key(&v2),
+        );
+
+        if !v1_exists || !v2_exists {
+            return;
+        }
+
+        // Check if edge already exists
+        if let Some(vertex) = self.vertices.get(&v1) {
+            let exists = vertex.edges.iter().any(|e| e.target_id == v2)
+                || vertex.orthogonal_edges.iter().any(|e| e.target_id == v2);
+
+            if !exists {
+                // Add edge (default to regular, non-orthogonal)
+                self.add_edge(v1, v2, false);
+            }
+        }
+    }
+}
+
+/// Helper: Check if edge intersects polygon
+fn edge_intersects_polygon(p1: &Point, p2: &Point, polygon: &Polygon) -> bool {
+    segment_intersects_polygon_interior(p1, p2, polygon)
 }
 
 // ============================================================================

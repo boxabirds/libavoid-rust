@@ -58,6 +58,7 @@ pub mod vpsc;
 pub mod channel;
 pub mod orthogonal_visgraph;
 pub mod pin_visibility;  // Task #14 stub
+pub mod debug_viz;  // Task #22 - Debug visualization
 
 #[cfg(feature = "wasm")]
 pub mod wasm;

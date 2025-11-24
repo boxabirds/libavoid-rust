@@ -5,6 +5,8 @@
 
 use crate::geometry::{Point, Polygon, PolygonInterface};
 use std::sync::Arc;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // ============================================================================
 // Connection Direction Flags
@@ -304,6 +306,78 @@ impl Checkpoint {
 pub type ConnectorCallback = Arc<dyn Fn(&ConnRef) + Send + Sync>;
 
 // ============================================================================
+// Route Cache (Task #20)
+// ============================================================================
+
+/// Cache entry for computed routes
+#[derive(Debug, Clone)]
+pub struct RouteCache {
+    /// Hash of the routing configuration (endpoints + obstacles + params)
+    config_hash: u64,
+    /// Cached route
+    cached_route: Polygon,
+    /// When the cache was created (for age-based invalidation)
+    timestamp: std::time::Instant,
+}
+
+impl RouteCache {
+    /// Create new route cache entry
+    fn new(config_hash: u64, route: Polygon) -> Self {
+        RouteCache {
+            config_hash,
+            cached_route: route,
+            timestamp: std::time::Instant::now(),
+        }
+    }
+
+    /// Check if cache is valid for given configuration hash
+    fn is_valid(&self, config_hash: u64, max_age_ms: u64) -> bool {
+        if self.config_hash != config_hash {
+            return false;
+        }
+
+        let age = self.timestamp.elapsed().as_millis() as u64;
+        age < max_age_ms
+    }
+
+    /// Get cached route
+    fn get_route(&self) -> &Polygon {
+        &self.cached_route
+    }
+}
+
+/// Compute configuration hash for route caching
+pub fn compute_route_config_hash(
+    src: &Point,
+    dst: &Point,
+    checkpoints: &[Point],
+    obstacle_count: usize,
+    routing_type: ConnType,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    // Hash source and destination (quantized to avoid floating point issues)
+    ((src.x * 1000.0) as i64).hash(&mut hasher);
+    ((src.y * 1000.0) as i64).hash(&mut hasher);
+    ((dst.x * 1000.0) as i64).hash(&mut hasher);
+    ((dst.y * 1000.0) as i64).hash(&mut hasher);
+
+    // Hash checkpoints
+    for cp in checkpoints {
+        ((cp.x * 1000.0) as i64).hash(&mut hasher);
+        ((cp.y * 1000.0) as i64).hash(&mut hasher);
+    }
+
+    // Hash obstacle count (as proxy for obstacle configuration)
+    obstacle_count.hash(&mut hasher);
+
+    // Hash routing type
+    (routing_type as u32).hash(&mut hasher);
+
+    hasher.finish()
+}
+
+// ============================================================================
 // Connector Reference
 // ============================================================================
 
@@ -338,6 +412,8 @@ pub struct ConnRef {
     hate_crossings: bool,
     /// Whether the route needs attention (fallback was used)
     needs_attention: bool,
+    /// Route cache for performance optimization (Task #20)
+    route_cache: Option<RouteCache>,
 }
 
 impl ConnRef {
@@ -358,6 +434,7 @@ impl ConnRef {
             callback: None,
             hate_crossings: false,
             needs_attention: false,
+            route_cache: None,
         }
     }
 
@@ -378,6 +455,7 @@ impl ConnRef {
             callback: None,
             hate_crossings: false,
             needs_attention: false,
+            route_cache: None,
         }
     }
 
@@ -398,6 +476,7 @@ impl ConnRef {
             callback: None,
             hate_crossings: false,
             needs_attention: false,
+            route_cache: None,
         }
     }
 
@@ -533,6 +612,35 @@ impl ConnRef {
     /// Sets whether the route needs attention
     pub fn set_needs_attention(&mut self, value: bool) {
         self.needs_attention = value;
+    }
+
+    /// Clear the route cache (Task #20)
+    pub fn clear_route_cache(&mut self) {
+        self.route_cache = None;
+    }
+
+    /// Check if route is cached and valid (Task #20)
+    pub fn has_valid_cache(&self, config_hash: u64, max_age_ms: u64) -> bool {
+        if let Some(ref cache) = self.route_cache {
+            cache.is_valid(config_hash, max_age_ms)
+        } else {
+            false
+        }
+    }
+
+    /// Get cached route if available (Task #20)
+    pub fn get_cached_route(&self, config_hash: u64, max_age_ms: u64) -> Option<Polygon> {
+        if let Some(ref cache) = self.route_cache {
+            if cache.is_valid(config_hash, max_age_ms) {
+                return Some(cache.get_route().clone());
+            }
+        }
+        None
+    }
+
+    /// Store route in cache (Task #20)
+    pub fn cache_route(&mut self, config_hash: u64, route: Polygon) {
+        self.route_cache = Some(RouteCache::new(config_hash, route));
     }
 
     /// Sets the callback function for route updates
