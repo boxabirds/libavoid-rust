@@ -434,6 +434,7 @@ These tasks improve feature completeness but don't block basic parity.
 **Priority:** P2
 **Effort:** 3-4 hours
 **Complexity:** Medium
+**Status:** DEFERRED - Option accessible via API, full implementation deferred to future work
 
 - [ ] #11a **Detect shared paths at connector ends**
   - **Location:** `src/graph.rs::find_path_with_result()`
@@ -462,6 +463,7 @@ These tasks improve feature completeness but don't block basic parity.
 **Priority:** P2
 **Effort:** 3-4 hours
 **Complexity:** Medium
+**Status:** DEFERRED - Option accessible via API, full implementation deferred to future work
 
 - [ ] #12a **Detect touching colinear segments**
   - **Location:** `src/channel.rs::build_shift_segments()`
@@ -490,6 +492,7 @@ These tasks improve feature completeness but don't block basic parity.
 **Priority:** P2
 **Effort:** 6-8 hours
 **Complexity:** High
+**Status:** DEFERRED - Option accessible via API, full implementation deferred to future work
 
 This is a preprocessing step that unifies overlapping segments before VPSC solving.
 
@@ -525,6 +528,7 @@ This is a preprocessing step that unifies overlapping segments before VPSC solvi
 **Priority:** P2
 **Effort:** 1-2 days
 **Complexity:** High
+**Status:** DEFERRED - Basic pin support exists, full visibility computation deferred
 
 Currently, pin selection works but pin-to-pin visibility is not fully computed.
 
