@@ -135,7 +135,10 @@ impl Router {
             channel_router: ChannelRouter::new(),
             parameters: HashMap::new(),
             options: HashMap::new(),
-            transaction_mode: (flags & ROUTER_FLAG_USE_TRANSACTIONS) != 0,
+            // Transaction mode defaults to false for backward compatibility
+            // Use set_transaction_use(true) to enable batched processing
+            // Note: C++ libavoid defaults to true (m_consolidate_actions)
+            transaction_mode: false,
             transaction_pending: Vec::new(),
             action_queue: VecDeque::new(),
             reroute_queue: HashSet::new(),
@@ -502,6 +505,11 @@ impl Router {
             // Fallback: reroute all connectors if nothing in queue
             self.reroute_all_connectors();
         }
+
+        // Apply nudging to orthogonal routes if enabled (after all routing is done)
+        if self.options.get(&RoutingOption::NudgeOrthogonalRoutes).copied().unwrap_or(false) {
+            self.nudge_orthogonal_routes();
+        }
     }
 
     /// Routes a single connector
@@ -766,21 +774,28 @@ impl Router {
         for conn_id in conn_ids {
             self.route_connector(conn_id);
         }
-
-        // Apply nudging to orthogonal routes if enabled
-        if self.options.get(&RoutingOption::NudgeOrthogonalRoutes).copied().unwrap_or(false) {
-            self.nudge_orthogonal_routes();
-        }
+        // Note: Nudging is applied after this in process_transaction()
     }
 
     /// Nudges orthogonal routes to prevent overlap
     fn nudge_orthogonal_routes(&mut self) {
         // Collect orthogonal connectors with valid routes
+        #[cfg(test)]
+        {
+            eprintln!("nudge_orthogonal_routes: checking {} connectors", self.connectors.len());
+            for (id, conn) in &self.connectors {
+                eprintln!("  conn {}: type={:?}, has_route={}", id, conn.routing_type(), conn.route().is_some());
+            }
+        }
+
         let orthogonal_conn_ids: Vec<u32> = self.connectors
             .iter()
             .filter(|(_, conn)| conn.routing_type() == ConnType::Orthogonal && conn.route().is_some())
             .map(|(id, _)| *id)
             .collect();
+
+        #[cfg(test)]
+        eprintln!("nudge_orthogonal_routes: found {} orthogonal connectors with routes", orthogonal_conn_ids.len());
 
         if orthogonal_conn_ids.is_empty() {
             return;
@@ -793,6 +808,9 @@ impl Router {
             .filter_map(|conn| conn.route().cloned())
             .collect();
 
+        #[cfg(test)]
+        eprintln!("nudge_orthogonal_routes: extracted {} routes", routes.len());
+
         if routes.is_empty() {
             return;
         }
@@ -803,8 +821,15 @@ impl Router {
             .map(|shape| shape.polygon().clone())
             .collect();
 
+        // Get nudge distance from parameter (default is 4.0)
+        let nudge_distance = self.parameters
+            .get(&RoutingParameter::IdealNudgingDistance)
+            .copied()
+            .unwrap_or(4.0);
+
         // Apply channel-based nudging with obstacle awareness
-        self.channel_router.nudge_routes_with_obstacles(&mut routes, &obstacles);
+        let channel_router = ChannelRouter::with_nudge_distance(nudge_distance);
+        channel_router.nudge_routes_with_obstacles(&mut routes, &obstacles);
 
         // Update connector routes with nudged positions
         for (i, conn_id) in orthogonal_conn_ids.iter().enumerate() {

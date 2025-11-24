@@ -324,6 +324,47 @@
       </div>
     </div>
 
+    <!-- 10. Routing Options Comparison -->
+    <div class="example-card" style="grid-column: span 2;">
+      <div class="example-header">
+        <h2>10. Routing Options Comparison <span class="badge badge-advanced">Advanced</span></h2>
+        <p>Side-by-side comparison of different routing options and parameters</p>
+      </div>
+      <div class="example-content">
+        <div class="comparison-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+          <div class="comparison-cell">
+            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudging OFF</div>
+            <div class="canvas-container" style="margin-bottom: 0;">
+              <svg id="canvas-compare-1" viewBox="0 0 200 150"></svg>
+            </div>
+          </div>
+          <div class="comparison-cell">
+            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 4px</div>
+            <div class="canvas-container" style="margin-bottom: 0;">
+              <svg id="canvas-compare-2" viewBox="0 0 200 150"></svg>
+            </div>
+          </div>
+          <div class="comparison-cell">
+            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 8px</div>
+            <div class="canvas-container" style="margin-bottom: 0;">
+              <svg id="canvas-compare-3" viewBox="0 0 200 150"></svg>
+            </div>
+          </div>
+          <div class="comparison-cell">
+            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 16px</div>
+            <div class="canvas-container" style="margin-bottom: 0;">
+              <svg id="canvas-compare-4" viewBox="0 0 200 150"></svg>
+            </div>
+          </div>
+        </div>
+        <div class="controls" style="margin-top: 10px;">
+          <button onclick="examples.comparison.run()">Run Comparison</button>
+          <button onclick="examples.comparison.reset()">Reset</button>
+        </div>
+        <div class="output" id="output-comparison">Click "Run Comparison" to see different nudging settings</div>
+      </div>
+    </div>
+
   </div>
 
   <script type="module" src="gallery.js"></script>

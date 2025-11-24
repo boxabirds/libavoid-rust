@@ -30,6 +30,46 @@ const COLORS = {
   interactive: '#06b6d4'
 };
 
+// Highly visible color palette for cycling through connectors
+const CONNECTOR_PALETTE = [
+  '#2563eb', // blue
+  '#dc2626', // red
+  '#16a34a', // green
+  '#9333ea', // purple
+  '#ea580c', // orange
+  '#0891b2', // cyan
+  '#c026d3', // fuchsia
+  '#65a30d', // lime
+  '#0d9488', // teal
+  '#e11d48', // rose
+];
+
+// Routing options (boolean flags) - indices match Rust RoutingOption enum
+const RoutingOption = {
+  NUDGE_ORTHOGONAL_ROUTES: 0,
+  PENALISE_ORTHOGONAL_SHARED_PATHS: 1,
+  NUDGE_ORTHOGONAL_TOUCHING_COLINEAR: 2,
+  PERFORM_UNIFYING_NUDGING_PREPROCESSING: 3,
+  IMPROVE_HYPEREDGE_ORTHOGONAL_ROUTES: 4,
+  PENALISE_CROSSING_SHARED_PATHS: 5,
+  NUDGE_PREPROCESSED_TOUCHING_PATHS: 6,
+  NUDGE_ORTHOGONAL_SEGMENTS_CONNECTED_TO_SHAPES: 7,
+  NUDGE_SEGMENT_IF_TOUCHING_OBSTACLE: 8,
+};
+
+// Routing parameters (numeric values) - indices match Rust RoutingParameter enum
+const RoutingParameter = {
+  SEGMENT_PENALTY: 0,
+  ANGLE_PENALTY: 1,
+  CROSSING_PENALTY: 2,
+  CLUSTER_CROSSING_PENALTY: 3,
+  FIXED_SHARED_PATH_PENALTY: 4,
+  PORT_DIRECTION_PENALTY: 5,
+  SHAPE_BUFFER_DISTANCE: 6,
+  IDEAL_NUDGING_DISTANCE: 7,
+  REVERSE_DIRECTION_PENALTY: 8,
+};
+
 // SVG namespace
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -822,14 +862,22 @@ window.examples.interactive = {
   mode: 'shape',
   pendingConnector: null,
   nextShapeId: 1,
+  nextColorIndex: 0,
 
   init: function() {
-    this.router = new Router(POLY_LINE_ROUTING);
+    this.router = new Router(ORTHOGONAL_ROUTING); // Use orthogonal for nudging
+
+    // Enable nudging for PCB-style parallel lanes
+    this.router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
+    // Set nudging distance
+    this.router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, 8.0);
+
     this.shapes = [];
     this.connectors = [];
     this.mode = 'shape';
     this.pendingConnector = null;
     this.nextShapeId = 1;
+    this.nextColorIndex = 0;
 
     const canvas = document.getElementById('canvas-interactive');
     canvas.onclick = (e) => this._handleClick(e);
@@ -890,9 +938,10 @@ window.examples.interactive = {
     const pt = new Point(x, y);
 
     if (!this.pendingConnector) {
-      // First click - set source
-      this.pendingConnector = { src: pt };
-      drawPoint('canvas-interactive', x, y, 6, COLORS.interactive);
+      // First click - set source, assign color now
+      const color = CONNECTOR_PALETTE[this.nextColorIndex % CONNECTOR_PALETTE.length];
+      this.pendingConnector = { src: pt, color };
+      drawPoint('canvas-interactive', x, y, 6, color);
     } else {
       // Second click - create connector
       const conn = ConnRef.createWithEndpoints(this.router,
@@ -903,9 +952,11 @@ window.examples.interactive = {
       this.connectors.push({
         conn,
         src: this.pendingConnector.src,
-        dst: pt
+        dst: pt,
+        color: this.pendingConnector.color
       });
 
+      this.nextColorIndex++;
       this.pendingConnector = null;
       this._rerouteAndRedraw();
     }
@@ -924,14 +975,14 @@ window.examples.interactive = {
                COLORS.obstacleFill, COLORS.obstacle);
     });
 
-    // Draw connectors
-    this.connectors.forEach(({ conn, src, dst }) => {
-      drawPoint('canvas-interactive', src.x, src.y, 5, COLORS.interactive);
-      drawPoint('canvas-interactive', dst.x, dst.y, 5, COLORS.interactive);
+    // Draw connectors with their assigned colors
+    this.connectors.forEach(({ conn, src, dst, color }) => {
+      drawPoint('canvas-interactive', src.x, src.y, 5, color);
+      drawPoint('canvas-interactive', dst.x, dst.y, 5, color);
 
       const route = this.router.getConnectorRoute(conn.id());
       if (route) {
-        drawRoute('canvas-interactive', route, COLORS.interactive);
+        drawRoute('canvas-interactive', route, color, 3);
       }
     });
   },
@@ -962,8 +1013,11 @@ window.examples.nudging = {
     // Create router with orthogonal routing
     const router = new Router(ORTHOGONAL_ROUTING);
 
-    // Enable route nudging (option 0 = NudgeOrthogonalRoutes)
-    router.setRoutingOption(0, true);
+    // Enable transaction mode - required for nudging to work
+    router.setTransactionUse(true);
+
+    // Enable route nudging
+    router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
 
     // Create a simple obstacle
     const obstaclePoly = createRectPolygon(150, 80, 100, 90);
@@ -1026,6 +1080,117 @@ window.examples.nudging = {
     clearSvg('canvas-nudging');
     clearLog('output-nudging');
     log('output-nudging', 'Click "Run Example" to see route nudging');
+  }
+};
+
+// ============================================================================
+// 10. Routing Options Comparison
+// ============================================================================
+
+window.examples.comparison = {
+  // Configuration for each panel: [canvasId, enableNudge, nudgeDistance]
+  PANEL_CONFIG: [
+    { id: 'canvas-compare-1', enableNudge: false, nudgeDistance: 0 },
+    { id: 'canvas-compare-2', enableNudge: true, nudgeDistance: 4 },
+    { id: 'canvas-compare-3', enableNudge: true, nudgeDistance: 8 },
+    { id: 'canvas-compare-4', enableNudge: true, nudgeDistance: 16 },
+  ],
+
+  // Obstacle in the center to force routes around it
+  OBSTACLE: { x: 70, y: 50, width: 60, height: 50 },
+
+  // Three routes that must go around the obstacle
+  // Without nudging: routes stack on same path
+  // With nudging: they separate by IDEAL_NUDGING_DISTANCE
+  ROUTES: [
+    { src: { x: 15, y: 75 }, dst: { x: 185, y: 75 }, color: '#2563eb' },
+    { src: { x: 15, y: 75 }, dst: { x: 185, y: 75 }, color: '#dc2626' },
+    { src: { x: 15, y: 75 }, dst: { x: 185, y: 75 }, color: '#16a34a' },
+  ],
+
+  runPanel: function(panelConfig) {
+    const router = new Router(ORTHOGONAL_ROUTING);
+
+    // Enable transaction mode - required for nudging to work
+    router.setTransactionUse(true);
+
+    // Configure nudging
+    if (panelConfig.enableNudge) {
+      router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
+      router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, panelConfig.nudgeDistance);
+    }
+
+    // Create obstacle if defined
+    const obs = this.OBSTACLE;
+    if (obs) {
+      console.log(`Panel ${panelConfig.id}: Creating obstacle at (${obs.x}, ${obs.y}, ${obs.width}, ${obs.height})`);
+      const obstaclePoly = createRectPolygon(obs.x, obs.y, obs.width, obs.height);
+      const obstacle = new ShapeRef(router, obstaclePoly);
+      router.addShape(obstacle);
+
+      // Draw obstacle
+      drawRect(panelConfig.id, obs.x, obs.y, obs.width, obs.height,
+               COLORS.obstacleFill, COLORS.obstacle);
+    } else {
+      console.log(`Panel ${panelConfig.id}: No obstacle defined`);
+    }
+
+    // Create connectors using createWithEndpoints pattern
+    const connectors = this.ROUTES.map(route => {
+      const conn = ConnRef.createWithEndpoints(router,
+        new ConnEnd(new Point(route.src.x, route.src.y)),
+        new ConnEnd(new Point(route.dst.x, route.dst.y)));
+      conn.setRoutingType(ORTHOGONAL_ROUTING);
+      router.addConnector(conn);
+      // Draw small endpoint markers
+      drawPoint(panelConfig.id, route.src.x, route.src.y, 3, route.color);
+      drawPoint(panelConfig.id, route.dst.x, route.dst.y, 3, route.color);
+      return { conn, color: route.color };
+    });
+
+    // Route
+    router.processTransaction();
+
+    // Draw routes with debug logging
+    connectors.forEach(({ conn, color }, idx) => {
+      const route = router.getConnectorRoute(conn.id());
+      if (route && route.size() > 0) {
+        drawRoute(panelConfig.id, route, color, 1.5);
+        // Log first point Y for debugging
+        const firstPt = route.at(0);
+        if (firstPt && idx === 0) {
+          console.log(`Panel ${panelConfig.id}: Route ${idx} Y=${firstPt.y}, size=${route.size()}`);
+        }
+      } else {
+        console.log(`Panel ${panelConfig.id}: Route ${idx} has no route!`);
+      }
+    });
+  },
+
+  run: function() {
+    clearLog('output-comparison');
+    log('output-comparison', 'Routing Options Comparison:');
+    log('output-comparison', '');
+
+    // Run each panel
+    this.PANEL_CONFIG.forEach((config, i) => {
+      clearSvg(config.id);
+      this.runPanel(config);
+
+      const label = config.enableNudge
+        ? `Panel ${i + 1}: Nudge = ${config.nudgeDistance}px`
+        : `Panel ${i + 1}: Nudging OFF (routes overlap)`;
+      log('output-comparison', label);
+    });
+
+    log('output-comparison', '');
+    log('output-comparison', '✓ Compare how IDEAL_NUDGING_DISTANCE affects route separation');
+  },
+
+  reset: function() {
+    this.PANEL_CONFIG.forEach(config => clearSvg(config.id));
+    clearLog('output-comparison');
+    log('output-comparison', 'Click "Run Comparison" to see different nudging settings');
   }
 };
 

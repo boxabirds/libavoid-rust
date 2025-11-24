@@ -309,3 +309,61 @@ fn test_debug_router_obstacle_detection() {
     
     assert!(route.size() > 2, "Route should avoid obstacle, got {} points", route.size());
 }
+
+#[test]
+fn test_orthogonal_nudging_via_router() {
+    use libavoid::RoutingOption;
+
+    // Create router with orthogonal routing type
+    let mut router = Router::new(ConnType::Orthogonal as u32);
+
+    // Enable nudging
+    router.set_routing_option(RoutingOption::NudgeOrthogonalRoutes, true);
+
+    // No obstacles - just test pure nudging
+    // Create three connectors with identical endpoints
+    let src = ConnEnd::new(Point::new(15.0, 75.0));
+    let dst = ConnEnd::new(Point::new(185.0, 75.0));
+
+    // Create connectors using transaction mode for efficiency
+    router.set_transaction_use(true);
+
+    let conn1_id = router.new_connector(src.clone(), dst.clone());
+    let conn2_id = router.new_connector(src.clone(), dst.clone());
+    let conn3_id = router.new_connector(src.clone(), dst.clone());
+
+    // Set orthogonal routing type
+    if let Some(c) = router.get_connector_mut(conn1_id) {
+        c.set_routing_type(ConnType::Orthogonal);
+    }
+    if let Some(c) = router.get_connector_mut(conn2_id) {
+        c.set_routing_type(ConnType::Orthogonal);
+    }
+    if let Some(c) = router.get_connector_mut(conn3_id) {
+        c.set_routing_type(ConnType::Orthogonal);
+    }
+
+    // Process transaction to route and nudge
+    router.process_transaction();
+
+    // Get the routes
+    let route1 = router.get_connector(conn1_id).unwrap().display_route().unwrap();
+    let route2 = router.get_connector(conn2_id).unwrap().display_route().unwrap();
+    let route3 = router.get_connector(conn3_id).unwrap().display_route().unwrap();
+
+    println!("Route 1: {:?}", (0..route1.size()).map(|i| route1.at(i)).collect::<Vec<_>>());
+    println!("Route 2: {:?}", (0..route2.size()).map(|i| route2.at(i)).collect::<Vec<_>>());
+    println!("Route 3: {:?}", (0..route3.size()).map(|i| route3.at(i)).collect::<Vec<_>>());
+
+    // Routes should have been nudged apart
+    // Check Y coordinates of first point (or any point on horizontal segment)
+    let y1 = route1.at(0).y;
+    let y2 = route2.at(0).y;
+    let y3 = route3.at(0).y;
+
+    println!("Y coordinates: {} {} {}", y1, y2, y3);
+
+    // After nudging, the Y coordinates should be different
+    let all_same = (y1 - y2).abs() < 0.1 && (y2 - y3).abs() < 0.1;
+    assert!(!all_same, "Routes should be nudged apart! Y coords: {}, {}, {}", y1, y2, y3);
+}

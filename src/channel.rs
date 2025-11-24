@@ -128,8 +128,8 @@ impl ShiftSegment {
         let (self_min, self_max) = self.range(routes);
         let (other_min, other_max) = other.range(routes);
 
-        // Check for overlap
-        self_max > other_min && other_max > self_min
+        // Check for overlap (use >= for touching segments to count as overlapping)
+        self_max >= other_min && other_max >= self_min
     }
 }
 
@@ -227,6 +227,11 @@ impl ChannelRouter {
     }
 
     /// Compute movement limits for a segment
+    ///
+    /// Note: Unlike C++ libavoid which uses sweep-line channel computation,
+    /// we use a simpler approach that allows significant movement but still
+    /// respects obstacles. The key insight is that nudging is meant to spread
+    /// overlapping routes apart, so we need generous limits to allow separation.
     fn compute_limits(&self, route: &Polygon, seg_idx: usize, dimension: usize) -> (f64, f64) {
         let p1 = route.at(seg_idx);
         let p2 = route.at(seg_idx + 1);
@@ -234,33 +239,17 @@ impl ChannelRouter {
         // Get perpendicular coordinate
         let perp = if dimension == 0 { p1.y } else { p1.x };
 
-        // By default, allow significant movement
+        // Allow significant movement - obstacles will constrain if needed
+        // Use a generous default to allow multiple routes to spread apart
         let default_range = 500.0;
-        let mut min_limit = perp - default_range;
-        let mut max_limit = perp + default_range;
+        let min_limit = perp - default_range;
+        let max_limit = perp + default_range;
 
-        // Constrain by endpoints if at start/end of route
-        if seg_idx == 0 {
-            // First segment - constrain to not pass start point
-            if dimension == 0 {
-                min_limit = min_limit.max(p1.y - self.nudge_distance);
-                max_limit = max_limit.min(p1.y + self.nudge_distance);
-            } else {
-                min_limit = min_limit.max(p1.x - self.nudge_distance);
-                max_limit = max_limit.min(p1.x + self.nudge_distance);
-            }
-        }
-
-        if seg_idx + 2 >= route.size() {
-            // Last segment - constrain to not pass end point
-            if dimension == 0 {
-                min_limit = min_limit.max(p2.y - self.nudge_distance);
-                max_limit = max_limit.min(p2.y + self.nudge_distance);
-            } else {
-                min_limit = min_limit.max(p2.x - self.nudge_distance);
-                max_limit = max_limit.min(p2.x + self.nudge_distance);
-            }
-        }
+        // Note: We intentionally don't constrain by endpoints here.
+        // The C++ libavoid uses sweep-line channel computation to find
+        // actual channel boundaries. Our simplified approach allows free
+        // movement in the perpendicular direction, relying on VPSC
+        // to minimize deviation from ideal positions.
 
         (min_limit, max_limit)
     }
@@ -288,6 +277,12 @@ impl ChannelRouter {
             for i in 0..route.size() - 1 {
                 let p1 = route.at(i);
                 let p2 = route.at(i + 1);
+
+                // Skip zero-length segments (from duplicate endpoints)
+                let is_zero_length = (p1.x - p2.x).abs() < 1e-6 && (p1.y - p2.y).abs() < 1e-6;
+                if is_zero_length {
+                    continue;
+                }
 
                 let is_horizontal = (p1.y - p2.y).abs() < 1e-6;
                 let is_vertical = (p1.x - p2.x).abs() < 1e-6;
@@ -595,6 +590,44 @@ mod tests {
             "At least one dimension should be nudged: h_gap={}, v_gap={}",
             h_gap,
             v_gap
+        );
+    }
+
+    #[test]
+    fn test_router_integration_routes() {
+        // Exact routes from the failing integration test
+        // (15, 75) to (185, 75) with duplicate endpoint (like Router produces)
+        let router = ChannelRouter::new();
+        let mut routes = vec![
+            make_route(&[(15.0, 75.0), (185.0, 75.0), (185.0, 75.0)]),
+            make_route(&[(15.0, 75.0), (185.0, 75.0), (185.0, 75.0)]),
+            make_route(&[(15.0, 75.0), (185.0, 75.0), (185.0, 75.0)]),
+        ];
+
+        router.nudge_routes_with_obstacles(&mut routes, &[]);
+
+        // All routes should be pushed apart
+        let y1 = routes[0].at(0).y;
+        let y2 = routes[1].at(0).y;
+        let y3 = routes[2].at(0).y;
+
+        let mut ys = vec![y1, y2, y3];
+        ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let gap1 = ys[1] - ys[0];
+        let gap2 = ys[2] - ys[1];
+
+        assert!(
+            gap1 >= DEFAULT_NUDGE_DISTANCE - 0.1,
+            "Gap1 {} should be >= {}",
+            gap1,
+            DEFAULT_NUDGE_DISTANCE
+        );
+        assert!(
+            gap2 >= DEFAULT_NUDGE_DISTANCE - 0.1,
+            "Gap2 {} should be >= {}",
+            gap2,
+            DEFAULT_NUDGE_DISTANCE
         );
     }
 }

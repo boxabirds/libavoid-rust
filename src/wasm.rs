@@ -40,7 +40,7 @@ pub mod constants {
     pub const CONN_TYPE_POLY_LINE: u32 = 1;
     pub const CONN_TYPE_ORTHOGONAL: u32 = 2;
 
-    /// Routing parameters
+    /// Routing parameters (for setRoutingParameter)
     pub const SEGMENT_PENALTY: u32 = 0;
     pub const ANGLE_PENALTY: u32 = 1;
     pub const CROSSING_PENALTY: u32 = 2;
@@ -51,7 +51,7 @@ pub mod constants {
     pub const IDEAL_NUDGING_DISTANCE: u32 = 7;
     pub const REVERSE_DIRECTION_PENALTY: u32 = 8;
 
-    /// Routing options
+    /// Routing options (for setRoutingOption)
     pub const NUDGE_ORTHOGONAL_SEGMENTS: u32 = 0;
     pub const IMPROVE_HYPEREDGE_ROUTES: u32 = 1;
     pub const PENALISE_SHARED_PATHS: u32 = 2;
@@ -653,6 +653,14 @@ impl Router {
     pub fn process_transaction(&mut self) -> bool {
         self.inner.process_transaction();
         true
+    }
+
+    /// Enable or disable transaction mode
+    /// When enabled, changes are batched until processTransaction is called
+    /// This is required for nudging to work correctly
+    #[wasm_bindgen(js_name = setTransactionUse)]
+    pub fn set_transaction_use(&mut self, use_transactions: bool) {
+        self.inner.set_transaction_use(use_transactions);
     }
 
     /// Move shape by offset from current position
