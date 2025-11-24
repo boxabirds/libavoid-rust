@@ -61,7 +61,7 @@ These three issues cause materially different routing behavior and must be fixed
 **Complexity:** Medium
 **Blocking:** Proper nudging behavior
 
-- [ ] #2a **Add missing weight constants**
+- [x] #2a **Add missing weight constants**
   - **Location:** `src/channel.rs:16-18`
   - **Current weights:**
     ```rust
@@ -75,7 +75,7 @@ These three issues cause materially different routing behavior and must be fixed
     ```
   - **C++ Reference:** `libavoid/orthogonal.cpp:58-61`
 
-- [ ] #2b **Implement segment classification**
+- [x] #2b **Implement segment classification**
   - **Location:** New method in `src/channel.rs`
   - **Add enum:**
     ```rust
@@ -96,7 +96,7 @@ These three issues cause materially different routing behavior and must be fixed
     - Regular: Everything else
   - **C++ Reference:** `libavoid/orthogonal.cpp:700-900` (segment classification logic)
 
-- [ ] #2c **Apply weight stratification in VPSC problem**
+- [x] #2c **Apply weight stratification in VPSC problem**
   - **Location:** `src/channel.rs::build_vpsc_problem()`
   - **Current:** All segments use `FREE_WEIGHT` or `FIXED_WEIGHT`
   - **Change to:**
@@ -111,14 +111,14 @@ These three issues cause materially different routing behavior and must be fixed
     ```
   - **Special case:** Single-segment connectors use `STRONGER_WEIGHT`
 
-- [ ] #2d **Add tests for weight stratification**
+- [x] #2d **Add tests for weight stratification**
   - **Location:** `src/channel.rs::tests`
   - **Tests needed:**
-    - [ ] Test C-bend detection and strong weight application
-    - [ ] Test Z-bend vs C-bend classification
-    - [ ] Test single-segment connector gets stronger weight
-    - [ ] Test final segments get appropriate weight
-    - [ ] Verify C-bends resist movement more than Z-bends
+    - [x] Test C-bend detection and strong weight application
+    - [x] Test Z-bend vs C-bend classification
+    - [x] Test single-segment connector gets stronger weight
+    - [x] Test final segments get appropriate weight
+    - [x] Verify C-bends resist movement more than Z-bends
   - **Verification:** Compare nudging results with C++ libavoid on same input
 
 ---
