@@ -263,31 +263,27 @@ These tasks improve quality and maintain consistency with C++ libavoid.
 **Effort:** 1-2 hours
 **Complexity:** Low
 
-- [ ] #5a **Add logarithmic angle penalty to pathfinding**
-  - **Location:** `src/graph.rs::find_path_with_result()` (cost computation section)
+- [x] #5a **Add logarithmic angle penalty to pathfinding**
+  - **Location:** `src/graph.rs::compute_angle_penalty()` (lines 349-358)
   - **Current:** Linear scaling `angle_penalty * (angle / π)`
   - **C++ Reference:** `libavoid/makepath.cpp:450-470` (cost() function)
-  - **Change to:**
+  - **Implemented:**
     ```rust
     // C++ uses: angleWeight * std::log10(1.0 + (angle / M_PI))
-    let normalized_angle = angle.abs() / std::f64::consts::PI;
-    let angle_cost = if angle_penalty > 0.0 {
-        angle_penalty * (1.0 + normalized_angle).log10()
-    } else {
-        0.0
-    };
-    cost += angle_cost;
+    let normalized_angle = angle / std::f64::consts::PI;
+    let angle_cost = self.angle_penalty * (1.0 + normalized_angle).log10();
+    angle_cost
     ```
-  - **Rationale:** Logarithmic scaling gives less penalty to moderate turns, more to sharp turns
+  - **Rationale:** Logarithmic scaling gives less overall penalty but proportionally more to moderate turns
   - **Impact:** Better path aesthetics, matches C++ behavior
 
-- [ ] #5b **Add test for angle penalty**
-  - **Location:** `src/graph.rs::tests` or `tests/parity_tests.rs`
-  - **Test:**
-    - Create path with various turn angles (45°, 90°, 135°, 180°)
-    - Verify logarithmic scaling (90° turn gets ~0.477x penalty vs 180°)
-    - Compare with linear scaling behavior
-    - Verify angle preference matches C++ libavoid
+- [x] #5b **Add test for angle penalty**
+  - **Location:** `src/graph.rs:608-648` (tests module)
+  - **Tests implemented:**
+    - `test_logarithmic_angle_penalty()`: Verifies log scaling for 0°, 90°, 180° turns
+    - Updated `test_angle_penalty_90_degree()` and `test_angle_penalty_180_degree()` to expect log values
+    - Verified logarithmic property: 90° gets ~0.585x penalty vs 180° (vs 0.5x with linear)
+  - **Test results:** All 105 tests passing
 
 ---
 

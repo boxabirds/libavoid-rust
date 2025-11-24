@@ -349,11 +349,13 @@ impl PathFinder {
         // Angle in radians
         let angle = dot.acos();
 
-        // Scale penalty by angle (0 for straight, max for 180° turn)
-        // Angle is 0 to PI, so we normalize to 0 to 1
-        let angle_factor = angle / std::f64::consts::PI;
+        // Use logarithmic scaling like C++ libavoid (makepath.cpp:450-470)
+        // This gives less penalty to moderate turns, more to sharp turns
+        // C++: angleWeight * std::log10(1.0 + (angle / M_PI))
+        let normalized_angle = angle / std::f64::consts::PI;
+        let angle_cost = self.angle_penalty * (1.0 + normalized_angle).log10();
 
-        self.angle_penalty * angle_factor
+        angle_cost
     }
 
     /// Computes penalty for moving away from the goal
@@ -559,22 +561,26 @@ mod tests {
     fn test_angle_penalty_90_degree() {
         let pf = PathFinder::new();
 
-        // 90 degree turn should have ~half the max penalty
+        // 90 degree turn with logarithmic scaling
+        // angle/π = 0.5, so log10(1.5) ≈ 0.176, penalty ≈ 8.8
         let prev = Point::new(1.0, 0.0);
         let curr = Point::new(0.0, 1.0);
         let penalty = pf.compute_angle_penalty(&prev, &curr);
-        assert!((penalty - DEFAULT_ANGLE_PENALTY * 0.5).abs() < 1.0);
+        let expected = DEFAULT_ANGLE_PENALTY * (1.0f64 + 0.5f64).log10();
+        assert!((penalty - expected).abs() < 0.1);
     }
 
     #[test]
     fn test_angle_penalty_180_degree() {
         let pf = PathFinder::new();
 
-        // 180 degree turn should have full penalty
+        // 180 degree turn with logarithmic scaling
+        // angle/π = 1.0, so log10(2.0) ≈ 0.301, penalty ≈ 15.05
         let prev = Point::new(1.0, 0.0);
         let curr = Point::new(-1.0, 0.0);
         let penalty = pf.compute_angle_penalty(&prev, &curr);
-        assert!((penalty - DEFAULT_ANGLE_PENALTY).abs() < 1.0);
+        let expected = DEFAULT_ANGLE_PENALTY * (1.0f64 + 1.0f64).log10();
+        assert!((penalty - expected).abs() < 0.1);
     }
 
     #[test]
@@ -597,5 +603,47 @@ mod tests {
         let result = result.unwrap();
         assert_eq!(result.path.len(), 4);
         assert_eq!(result.path, vec![v1, v2, v3, v4]);
+    }
+
+    #[test]
+    fn test_logarithmic_angle_penalty() {
+        let pf = PathFinder::new();
+
+        // Test logarithmic scaling (C++ parity)
+        // log10(1 + 0) = 0
+        // log10(1 + 0.5) ≈ 0.176
+        // log10(1 + 1.0) ≈ 0.301
+
+        // 0° turn (same direction)
+        let prev = Point::new(1.0, 0.0);
+        let curr = Point::new(1.0, 0.0);
+        let penalty_0 = pf.compute_angle_penalty(&prev, &curr);
+        assert!(penalty_0.abs() < 0.1, "0° turn should have ~0 penalty");
+
+        // 90° turn (angle/π = 0.5)
+        let prev = Point::new(1.0, 0.0);
+        let curr = Point::new(0.0, 1.0);
+        let penalty_90 = pf.compute_angle_penalty(&prev, &curr);
+        let expected_90 = DEFAULT_ANGLE_PENALTY * (1.0f64 + 0.5f64).log10(); // ≈ 8.8
+        assert!((penalty_90 - expected_90).abs() < 0.1,
+            "90° turn should use log scale: got {}, expected {}",
+            penalty_90, expected_90);
+
+        // 180° turn (angle/π = 1.0)
+        let prev = Point::new(1.0, 0.0);
+        let curr = Point::new(-1.0, 0.0);
+        let penalty_180 = pf.compute_angle_penalty(&prev, &curr);
+        let expected_180 = DEFAULT_ANGLE_PENALTY * (1.0f64 + 1.0f64).log10(); // ≈ 15.05
+        assert!((penalty_180 - expected_180).abs() < 0.1,
+            "180° turn should use log scale: got {}, expected {}",
+            penalty_180, expected_180);
+
+        // Verify logarithmic property: 90° penalty is proportionally higher
+        // With logarithmic scaling, moderate turns get relatively MORE penalty compared to sharp turns
+        // (as a ratio) than they would with linear scaling
+        // Linear: 90° = 0.5x of 180°, Logarithmic: 90° ≈ 0.585x of 180°
+        assert!(penalty_90 > penalty_180 / 2.0,
+            "Logarithmic scaling: 90° penalty should be > half of 180° penalty (ratio: {:.3})",
+            penalty_90 / penalty_180);
     }
 }
