@@ -39,7 +39,7 @@ These three issues cause materially different routing behavior and must be fixed
 **Complexity:** Trivial
 **Blocking:** All orthogonal routing quality
 
-- [ ] #1 **Change SegmentPenalty default from 1.0 to 10.0**
+- [x] #1 **Change SegmentPenalty default from 1.0 to 10.0**
   - **Location:** `src/router.rs:154`
   - **Current:** `router.parameters.insert(RoutingParameter::SegmentPenalty, 1.0);`
   - **Fix:** Change to `10.0`
@@ -48,9 +48,9 @@ These three issues cause materially different routing behavior and must be fixed
   - **C++ Reference:** `libavoid/router.cpp:89`
   - **Test:** Run `tests/parity_tests.rs` and verify routing costs match C++ behavior
   - **Verification:**
-    - [ ] Compare route segment counts before/after
-    - [ ] Verify orthogonal routes prefer fewer segments
-    - [ ] Test with Example 10 from gallery.html
+    - [x] Compare route segment counts before/after
+    - [x] Verify orthogonal routes prefer fewer segments
+    - [x] Test with Example 10 from gallery.html
 
 ---
 
@@ -240,7 +240,7 @@ These tasks improve quality and maintain consistency with C++ libavoid.
 **Effort:** 5 minutes
 **Complexity:** Trivial
 
-- [ ] #4 **Change transaction_mode default to true**
+- [x] #4 **Change transaction_mode default to true**
   - **Location:** `src/router.rs:140`
   - **Current:** `transaction_mode: false`
   - **Fix:** Change to `true` with updated comment
@@ -366,7 +366,7 @@ C++ has 5 routing options not present in Rust. Add them for configuration comple
 **Effort:** 10 minutes
 **Complexity:** Trivial
 
-- [ ] #7 **Change BendPenalty default from 50.0 to 0.0**
+- [x] #7 **Change BendPenalty default from 50.0 to 0.0**
   - **Location:** `src/router.rs:155`
   - **Current:** `router.parameters.insert(RoutingParameter::BendPenalty, 50.0);`
   - **Fix:** Change to `0.0`
@@ -384,7 +384,7 @@ C++ has 5 routing options not present in Rust. Add them for configuration comple
 **Effort:** 10 minutes
 **Complexity:** Trivial
 
-- [ ] #8 **Change ShapeBufferDistance default from 8.0 to 0.0**
+- [x] #8 **Change ShapeBufferDistance default from 8.0 to 0.0**
   - **Location:** `src/router.rs:159`
   - **Current:** `router.parameters.insert(RoutingParameter::ShapeBufferDistance, 8.0);`
   - **Fix:** Change to `0.0`

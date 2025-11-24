@@ -135,10 +135,10 @@ impl Router {
             channel_router: ChannelRouter::new(),
             parameters: HashMap::new(),
             options: HashMap::new(),
-            // Transaction mode defaults to false for backward compatibility
-            // Use set_transaction_use(true) to enable batched processing
-            // Note: C++ libavoid defaults to true (m_consolidate_actions)
-            transaction_mode: false,
+            // Transaction mode defaults to true for consistency with C++ libavoid
+            // Use set_transaction_use(false) for immediate processing
+            // C++ reference: m_consolidate_actions = true in router.cpp:62
+            transaction_mode: true,
             transaction_pending: Vec::new(),
             action_queue: VecDeque::new(),
             reroute_queue: HashSet::new(),
@@ -150,13 +150,13 @@ impl Router {
             next_junction_id: 1,
         };
 
-        // Set default parameters
-        router.parameters.insert(RoutingParameter::SegmentPenalty, 1.0);
-        router.parameters.insert(RoutingParameter::BendPenalty, 50.0);
+        // Set default parameters (matching C++ libavoid router.cpp:89-91)
+        router.parameters.insert(RoutingParameter::SegmentPenalty, 10.0);  // C++ default: 10
+        router.parameters.insert(RoutingParameter::BendPenalty, 0.0);      // C++ default: 0 (implicit)
         router.parameters.insert(RoutingParameter::CrossingPenalty, 0.0);
         router.parameters.insert(RoutingParameter::ClusterCrossingPenalty, 4000.0);
         router.parameters.insert(RoutingParameter::IdealNudgingDistance, 4.0);
-        router.parameters.insert(RoutingParameter::ShapeBufferDistance, 8.0);
+        router.parameters.insert(RoutingParameter::ShapeBufferDistance, 0.0);  // C++ default: 0 (implicit)
 
         // Set default options
         router.options.insert(RoutingOption::NudgeOrthogonalRoutes, false);
@@ -1204,7 +1204,8 @@ mod tests {
     #[test]
     fn test_router_creation() {
         let router = Router::new(ROUTER_FLAG_NONE);
-        assert!(!router.transaction_use());
+        // Transaction mode now defaults to true for C++ parity
+        assert!(router.transaction_use());
     }
 
     #[test]
@@ -1262,6 +1263,9 @@ mod tests {
         eprintln!("Shape added with id: {}", shape_id);
         eprintln!("Number of shapes: {}", router.shapes.len());
 
+        // Process transaction to build visibility graph
+        router.process_transaction();
+
         // Route that should go THROUGH the obstacle if bug exists
         let src = Point::new(50.0, 125.0);
         let dst = Point::new(350.0, 125.0);
@@ -1287,6 +1291,9 @@ mod tests {
             ConnEnd::new(src),
             ConnEnd::new(dst)
         );
+
+        // Process transaction to route the connector
+        router.process_transaction();
 
         let conn = router.get_connector(conn_id).unwrap();
         let route = conn.display_route().expect("Route should exist");
