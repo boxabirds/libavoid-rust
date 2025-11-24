@@ -29,6 +29,9 @@ fn parity_simple_obstacle_avoidance() {
     let dst = ConnEnd::new(Point::new(200.0, 100.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     // Get the route
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().unwrap();
@@ -65,6 +68,9 @@ fn parity_multiple_obstacles() {
     let dst = ConnEnd::new(Point::new(200.0, 100.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().unwrap();
 
@@ -95,6 +101,9 @@ fn parity_orthogonal_routing() {
     conn.set_routing_type(ConnType::Orthogonal);
     router.add_connector(conn);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     let conn = router.get_connector(1).unwrap();
     let route = conn.display_route().unwrap();
 
@@ -121,6 +130,9 @@ fn parity_direct_path_when_clear() {
     let src = ConnEnd::new(Point::new(0.0, 0.0));
     let dst = ConnEnd::new(Point::new(100.0, 100.0));
     let conn_id = router.new_connector(src, dst);
+
+    // Process transaction to compute routes
+    router.process_transaction();
 
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().unwrap();
@@ -152,7 +164,8 @@ fn parity_transaction_batching() {
     router_immediate.new_connector(src.clone(), dst.clone());
     router_batch.new_connector(src, dst);
 
-    // Process batch transaction
+    // Process transactions for both
+    router_immediate.process_transaction();
     router_batch.process_transaction();
 
     // Both should produce routes
@@ -179,6 +192,9 @@ fn parity_route_along_obstacle_edge() {
     let src = ConnEnd::new(Point::new(50.0, 50.0));
     let dst = ConnEnd::new(Point::new(50.0, 150.0));
     let conn_id = router.new_connector(src, dst);
+
+    // Process transaction to compute routes
+    router.process_transaction();
 
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().unwrap();
@@ -207,6 +223,9 @@ fn parity_endpoint_on_obstacle_boundary() {
     let dst = ConnEnd::new(Point::new(200.0, 125.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route();
 
@@ -222,6 +241,9 @@ fn parity_coincident_endpoints() {
     let src = ConnEnd::new(Point::new(100.0, 100.0));
     let dst = ConnEnd::new(Point::new(100.0, 100.0));
     let conn_id = router.new_connector(src, dst);
+
+    // Process transaction to compute routes
+    router.process_transaction();
 
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route();

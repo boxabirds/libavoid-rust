@@ -14,6 +14,9 @@ fn test_polyline_routes_around_obstacle() {
     let dst = ConnEnd::new(Point::new(100.0, 50.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     // Get the route
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().expect("Route should exist");
@@ -34,6 +37,9 @@ fn test_direct_path_when_clear() {
     let src = ConnEnd::new(Point::new(0.0, 0.0));
     let dst = ConnEnd::new(Point::new(100.0, 100.0));
     let conn_id = router.new_connector(src, dst);
+
+    // Process transaction to compute routes
+    router.process_transaction();
 
     // Get the route
     let conn = router.get_connector(conn_id).unwrap();
@@ -59,6 +65,9 @@ fn test_orthogonal_routing() {
     let mut conn = libavoid::ConnRef::with_endpoints(1, src, dst);
     conn.set_routing_type(ConnType::Orthogonal);
     let conn_id = router.add_connector(conn);
+
+    // Process transaction to compute routes
+    router.process_transaction();
 
     // Get the route
     let conn = router.get_connector(conn_id).unwrap();
@@ -98,6 +107,9 @@ fn test_multiple_obstacles() {
     let dst = ConnEnd::new(Point::new(100.0, 50.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().expect("Route should exist");
 
@@ -118,12 +130,18 @@ fn test_shape_movement_triggers_reroute() {
     let dst = ConnEnd::new(Point::new(100.0, 50.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process first transaction
+    router.process_transaction();
+
     let conn = router.get_connector(conn_id).unwrap();
     let route1 = conn.display_route().expect("Route should exist");
     let initial_waypoints = route1.size();
 
     // Move obstacle into the path
     router.move_shape(shape_id, Point::new(50.0, 50.0));
+
+    // Process transaction after move
+    router.process_transaction();
 
     let conn = router.get_connector(conn_id).unwrap();
     let route2 = conn.display_route().expect("Route should exist after move");
@@ -188,7 +206,7 @@ fn test_route_avoids_obstacle_horizontal_line() {
     let center_x = 175.0 + 50.0 / 2.0; // = 200
     let center_y = 100.0 + 50.0 / 2.0; // = 125
     let rect = Rectangle::new(Point::new(center_x, center_y), 50.0, 50.0);
-    
+
     println!("Rectangle center: ({}, {})", center_x, center_y);
     let poly: Polygon = rect.into();
     println!("Polygon points:");
@@ -196,13 +214,16 @@ fn test_route_avoids_obstacle_horizontal_line() {
         let p = poly.at(i);
         println!("  ({}, {})", p.x, p.y);
     }
-    
+
     router.add_shape(poly, 1);
 
     // Route from left to right at y=125 (same as obstacle center y)
     let src = ConnEnd::new(Point::new(50.0, 125.0));
     let dst = ConnEnd::new(Point::new(350.0, 125.0));
     let conn_id = router.new_connector(src, dst);
+
+    // Process transaction to compute routes
+    router.process_transaction();
 
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().expect("Route should exist");
@@ -263,16 +284,16 @@ fn test_geometry_intersection_detection() {
 fn test_debug_router_obstacle_detection() {
     use libavoid::geometry::{segment_intersects_polygon_interior};
     use libavoid::Obstacle;
-    
+
     let mut router = Router::new(0);
 
     // Add obstacle
     let rect = Rectangle::new(Point::new(200.0, 125.0), 50.0, 50.0);
     let shape_id = router.add_shape(rect.into(), 1);
-    
+
     println!("Shape added with id: {}", shape_id);
     println!("Number of shapes in router: {}", router.shapes().count());
-    
+
     // Check the shape is there and active
     if let Some(shape) = router.get_shape(shape_id) {
         println!("Shape found, is_active: {}", shape.is_active());
@@ -282,7 +303,7 @@ fn test_debug_router_obstacle_detection() {
             let p = poly.at(i);
             println!("  ({}, {})", p.x, p.y);
         }
-        
+
         // Test intersection directly with the shape's polygon
         let src = Point::new(50.0, 125.0);
         let dst = Point::new(350.0, 125.0);
@@ -297,7 +318,10 @@ fn test_debug_router_obstacle_detection() {
         ConnEnd::new(Point::new(50.0, 125.0)),
         ConnEnd::new(Point::new(350.0, 125.0))
     );
-    
+
+    // Process transaction to compute routes
+    router.process_transaction();
+
     let conn = router.get_connector(conn_id).unwrap();
     let route = conn.display_route().expect("Route should exist");
     

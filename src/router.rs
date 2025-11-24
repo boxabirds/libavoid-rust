@@ -824,14 +824,10 @@ impl Router {
         }
 
         // Create connector input for this route
-        let connectors = vec![ConnectorInput {
-            id: 0,
-            start: src,
-            end: dst,
-        }];
+        let connectors = vec![ConnectorInput::new(0, src, dst)];
 
         // Generate orthogonal visibility graph
-        let generator = OrthogonalVisGraphGenerator::new();
+        let mut generator = OrthogonalVisGraphGenerator::new();
         let ortho_graph = generator.generate(&obstacles, &connectors);
 
         // Find start and end vertices in the graph

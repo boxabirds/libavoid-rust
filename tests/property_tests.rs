@@ -219,12 +219,17 @@ fn property_shape_removal_updates_routes() {
     let dst = ConnEnd::new(Point::new(200.0, 100.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute initial routes
+    router.process_transaction();
+
     let route_with_obstacle = router.get_connector(conn_id).unwrap().display_route().cloned();
 
     // Remove obstacle
     router.delete_shape(shape_id);
 
-    // Re-route (in non-transaction mode, this happens automatically on shape removal)
+    // Process transaction after shape removal
+    router.process_transaction();
+
     let route_without_obstacle = router.get_connector(conn_id).unwrap().display_route().cloned();
 
     // Both routes should exist

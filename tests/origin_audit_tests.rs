@@ -32,6 +32,9 @@ fn test_route_updates_when_shape_moves_out_of_path() {
     let dst = ConnEnd::new(Point::new(200.0, 100.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     // Route should detour around obstacle
     let conn = router.get_connector(conn_id).unwrap();
     let route_before = conn.display_route().expect("Route should exist");
@@ -43,6 +46,9 @@ fn test_route_updates_when_shape_moves_out_of_path() {
 
     // Move shape out of the way (to y=300)
     router.move_shape(shape_id, Point::new(100.0, 300.0));
+
+    // Process transaction after move
+    router.process_transaction();
 
     // Route should now be direct
     let conn = router.get_connector(conn_id).unwrap();
@@ -72,6 +78,9 @@ fn test_route_updates_when_shape_moves_into_path() {
     let dst = ConnEnd::new(Point::new(200.0, 100.0));
     let conn_id = router.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router.process_transaction();
+
     // Route should be direct
     let conn = router.get_connector(conn_id).unwrap();
     let route_before = conn.display_route().expect("Route should exist");
@@ -84,6 +93,9 @@ fn test_route_updates_when_shape_moves_into_path() {
 
     // Move shape into the path
     router.move_shape(shape_id, Point::new(100.0, 100.0));
+
+    // Process transaction after move
+    router.process_transaction();
 
     // Route should now detour
     let conn = router.get_connector(conn_id).unwrap();
@@ -388,6 +400,9 @@ fn test_router_debug_state() {
         ConnEnd::new(Point::new(200.0, 100.0)),
     );
 
+    // Process transaction to build visibility graph
+    router.process_transaction();
+
     // Get debug state
     let state = router.debug_state();
 
@@ -424,6 +439,9 @@ fn test_connector_callback_invoked_on_route_change() {
 
     let conn_id = router.add_connector(conn);
 
+    // Process transaction to compute initial route
+    router.process_transaction();
+
     // Callback should have been invoked during initial routing
     let count_after_initial = callback_count.load(Ordering::SeqCst);
     assert!(
@@ -438,9 +456,8 @@ fn test_connector_callback_invoked_on_route_change() {
         1,
     );
 
-    // Need to explicitly trigger reroute - adding shape doesn't auto-reroute
-    // In immediate mode (non-transaction), we need to manually reroute
-    router.reroute_connector(conn_id);
+    // Process transaction to trigger reroute
+    router.process_transaction();
 
     // Callback should be invoked again
     let count_after_obstacle = callback_count.load(Ordering::SeqCst);
@@ -518,6 +535,9 @@ fn test_incremental_visibility_updates() {
     let dst = ConnEnd::new(Point::new(200.0, 50.0));
     let conn_id = router1.new_connector(src, dst);
 
+    // Process transaction to compute routes
+    router1.process_transaction();
+
     // Get initial route
     let route_initial = {
         let conn = router1.get_connector(conn_id).unwrap();
@@ -527,6 +547,9 @@ fn test_incremental_visibility_updates() {
 
     // Move shape (triggers incremental update)
     router1.move_shape(shape1_id, Point::new(50.0, 150.0)); // Move out of path
+
+    // Process transaction after move
+    router1.process_transaction();
 
     // Get route after incremental update
     let route_after_move = {
@@ -553,8 +576,14 @@ fn test_incremental_visibility_updates() {
     let dst2 = ConnEnd::new(Point::new(200.0, 50.0));
     let conn_id2 = router2.new_connector(src2, dst2);
 
+    // Process transaction
+    router2.process_transaction();
+
     // Move shape (triggers full rebuild)
     router2.move_shape(shape1_id2, Point::new(50.0, 150.0));
+
+    // Process transaction after move
+    router2.process_transaction();
 
     // Get route after full rebuild
     let route_full_rebuild = {

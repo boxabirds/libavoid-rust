@@ -383,25 +383,17 @@ Port C++ data structures verbatim. All structures go in `src/orthogonal_visgraph
 
 ## Implementation Order
 
-### Week 1: Foundation
 1. #1-#5 ScanlineNode and methods
 2. #6-#8 Event and LineSegment structs
 3. #38-#40 Unit tests for data structures
-
-### Week 2: Sweeps
 4. #9-#13 Event generation
 5. #14-#21 Vertical sweep (processEventVert)
 6. #22-#25 Horizontal sweep (processEventHori)
-
-### Week 3: Integration
 7. #26-#28 Edge creation
 8. #29-#30 Builder integration
 9. #31-#32 A* routing
-
-### Week 4: Cleanup
 10. #33-#37 Delete old code
 11. #41-#42 Integration tests
-12. Final verification
 
 ---
 
