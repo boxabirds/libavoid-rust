@@ -1149,7 +1149,7 @@ impl OrthogonalVisGraphGenerator {
 
                 // Process vertical segments and intersect with horizontal
                 v_segments.sort();
-                for v_seg in v_segments.list() {
+                for v_seg in v_segments.list_mut() {
                     self.intersect_segments(h_segments, v_seg, graph, point_to_vertex, point_key);
                 }
                 v_segments.clear();
@@ -1234,15 +1234,17 @@ impl OrthogonalVisGraphGenerator {
                 let min_limit = first_point_above(nodes, node_idx, YDIM);
                 let max_limit = first_point_below(nodes, node_idx, YDIM);
 
-                // Create segment upward
+                // Create segment upward (includes connector point as vertex)
                 if (vis_dirs & CONN_DIR_UP) != 0 && min_limit < cp_y {
-                    let seg = LineSegment::new(min_limit, cp_y, cp_x, false);
+                    let mut seg = LineSegment::new(min_limit, cp_y, cp_x, false);
+                    seg.insert_vertex(cp_y, node.conn_vertex_id, vis_dirs);
                     segments.insert(seg);
                 }
 
-                // Create segment downward
+                // Create segment downward (includes connector point as vertex)
                 if (vis_dirs & CONN_DIR_DOWN) != 0 && cp_y < max_limit {
-                    let seg = LineSegment::new(cp_y, max_limit, cp_x, false);
+                    let mut seg = LineSegment::new(cp_y, max_limit, cp_x, false);
+                    seg.insert_vertex(cp_y, node.conn_vertex_id, vis_dirs);
                     segments.insert(seg);
                 }
             }
@@ -1262,7 +1264,7 @@ impl OrthogonalVisGraphGenerator {
     fn intersect_segments<F>(
         &mut self,
         h_segments: &mut SegmentListWrapper,
-        v_seg: &LineSegment,
+        v_seg: &mut LineSegment,
         graph: &mut VisibilityGraph,
         point_to_vertex: &mut HashMap<(i64, i64), u32>,
         point_key: &F,
@@ -1283,13 +1285,14 @@ impl OrthogonalVisGraphGenerator {
             } else if (vert_x - h_seg.begin).abs() < 1e-10 {
                 // At beginning of horizontal segment
                 if in_vert_seg_region {
-                    // Add intersection vertex
+                    // Add intersection vertex to BOTH segments
                     let point = Point::new(vert_x, h_seg.pos);
                     let key = point_key(&point);
                     let vertex_id = *point_to_vertex
                         .entry(key)
                         .or_insert_with(|| graph.add_vertex(point));
                     h_seg.insert_vertex(vert_x, Some(vertex_id), 0);
+                    v_seg.insert_vertex(h_seg.pos, Some(vertex_id), 0);
                 }
             } else if (vert_x - h_seg.finish).abs() < 1e-10 {
                 // At end of horizontal segment
@@ -1300,6 +1303,7 @@ impl OrthogonalVisGraphGenerator {
                         .entry(key)
                         .or_insert_with(|| graph.add_vertex(point));
                     h_seg.insert_vertex(vert_x, Some(vertex_id), 0);
+                    v_seg.insert_vertex(h_seg.pos, Some(vertex_id), 0);
 
                     // Generate edges for this horizontal segment
                     self.generate_edges_from_segment(h_seg, true, graph, point_to_vertex, point_key);
@@ -1318,6 +1322,7 @@ impl OrthogonalVisGraphGenerator {
                         .entry(key)
                         .or_insert_with(|| graph.add_vertex(point));
                     h_seg.insert_vertex(vert_x, Some(vertex_id), 0);
+                    v_seg.insert_vertex(h_seg.pos, Some(vertex_id), 0);
                 }
             }
         }
@@ -1393,9 +1398,10 @@ impl OrthogonalVisGraphGenerator {
             vertex_ids.push(vertex_id);
         }
 
-        // Create edges between consecutive vertices
+        // Create bidirectional edges between consecutive vertices
         for window in vertex_ids.windows(2) {
             graph.add_edge(window[0], window[1], true);
+            graph.add_edge(window[1], window[0], true);
         }
     }
 }
@@ -1565,5 +1571,62 @@ mod tests {
         // Should have multiple vertices for the route
         let vertex_count = graph.vertices().count();
         assert!(vertex_count >= 4, "Expected at least 4 vertices, got {}", vertex_count);
+    }
+
+    #[test]
+    fn test_route_through_obstacle_blocked() {
+        // This test simulates the webdemo example 10 scenario
+        // Route: (30, 125) -> (370, 125) with obstacle at (175, 100) size 50x50
+        let mut generator = OrthogonalVisGraphGenerator::new();
+
+        // Obstacle bounds: x: 175-225, y: 100-150
+        // Route Y=125 passes through the obstacle
+        let obstacles = vec![
+            rect_obstacle(1, 175.0, 100.0, 50.0, 50.0),
+        ];
+
+        let connectors = vec![ConnectorInput::new(
+            1,
+            Point::new(30.0, 125.0),
+            Point::new(370.0, 125.0),
+        )];
+
+        let graph = generator.generate(&obstacles, &connectors);
+
+        // Debug: print all vertices and their edges
+        eprintln!("\n=== Visibility Graph Debug ===");
+        eprintln!("Vertices and edges:");
+        for v in graph.vertices() {
+            eprintln!("  v{}: ({}, {})", v.id, v.point.x, v.point.y);
+            for e in v.all_edges() {
+                if let Some(target) = graph.get_vertex(e.target_id) {
+                    eprintln!("    -> v{}: ({}, {})", e.target_id, target.point.x, target.point.y);
+                }
+            }
+        }
+        eprintln!("=== End Debug ===\n");
+
+        // Check that there's no direct horizontal edge at y=125 that spans through obstacle
+        // An edge from x < 175 to x > 225 at y=125 would cross the obstacle
+        for v1 in graph.vertices() {
+            if (v1.point.y - 125.0).abs() >= 1.0 {
+                continue;
+            }
+            for e in v1.all_edges() {
+                if let Some(v2) = graph.get_vertex(e.target_id) {
+                    // Check if horizontal edge at y=125
+                    if (v2.point.y - 125.0).abs() < 1.0 {
+                        let min_x = v1.point.x.min(v2.point.x);
+                        let max_x = v1.point.x.max(v2.point.x);
+
+                        // This edge should not span across the obstacle (175-225)
+                        if min_x < 175.0 && max_x > 225.0 {
+                            panic!("Found edge that crosses obstacle: ({}, {}) -> ({}, {})",
+                                v1.point.x, v1.point.y, v2.point.x, v2.point.y);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
