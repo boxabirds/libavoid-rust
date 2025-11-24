@@ -99,6 +99,10 @@ pub struct ShiftSegment {
     pub is_single_segment_route: bool,
     /// Whether this segment is connected to a shape (endpoint segment)
     pub connected_to_shape: bool,
+    /// Whether this segment touches a colinear segment from another route (Task #12)
+    pub touches_colinear: bool,
+    /// Whether this segment contains a checkpoint (Task #18)
+    pub contains_checkpoint: bool,
     /// Variable index in VPSC solver (set during solve)
     pub variable_idx: Option<usize>,
     /// Current position
@@ -127,6 +131,8 @@ impl ShiftSegment {
             segment_type: SegmentType::Regular,  // Default, will be classified later
             is_single_segment_route: false,  // Will be set during classification
             connected_to_shape: false,  // Will be detected during build
+            touches_colinear: false,  // Will be detected during build (Task #12)
+            contains_checkpoint: false,  // Will be detected if route has checkpoints (Task #18)
             variable_idx: None,
             position,
         }
@@ -151,6 +157,8 @@ impl ShiftSegment {
             segment_type: SegmentType::Fixed,
             is_single_segment_route: false,
             connected_to_shape: false,
+            touches_colinear: false,
+            contains_checkpoint: false,
             variable_idx: None,
             position,
         }
@@ -202,6 +210,13 @@ impl ShiftSegment {
 
         if route_len < 2 {
             self.segment_type = SegmentType::Regular;
+            return;
+        }
+
+        // Checkpoint segments are fixed (Task #18)
+        if self.contains_checkpoint {
+            self.fixed = true;
+            self.segment_type = SegmentType::Fixed;
             return;
         }
 
@@ -305,7 +320,7 @@ impl ChannelRouter {
 
     /// Nudge routes to spread overlapping segments, respecting obstacles
     pub fn nudge_routes_with_obstacles(&self, routes: &mut [Polygon], obstacles: &[Polygon]) {
-        self.nudge_routes_with_obstacles_and_options(routes, obstacles, false);
+        self.nudge_routes_with_obstacles_and_options(routes, obstacles, false, false);
     }
 
     /// Nudge routes with full control over segment filtering
@@ -314,11 +329,12 @@ impl ChannelRouter {
         routes: &mut [Polygon],
         obstacles: &[Polygon],
         nudge_shape_connected: bool,
+        nudge_touching_colinear: bool,
     ) {
         // Process horizontal segments (shift in Y)
-        self.nudge_dimension_with_obstacles(routes, 0, obstacles, nudge_shape_connected);
+        self.nudge_dimension_with_obstacles(routes, 0, obstacles, nudge_shape_connected, nudge_touching_colinear);
         // Process vertical segments (shift in X)
-        self.nudge_dimension_with_obstacles(routes, 1, obstacles, nudge_shape_connected);
+        self.nudge_dimension_with_obstacles(routes, 1, obstacles, nudge_shape_connected, nudge_touching_colinear);
     }
 
     /// Nudge segments in one dimension, respecting obstacles
@@ -328,6 +344,7 @@ impl ChannelRouter {
         dimension: usize,
         obstacles: &[Polygon],
         nudge_shape_connected: bool,
+        nudge_touching_colinear: bool,
     ) {
         // Build shift segments with obstacle-aware limits
         let mut segments = self.build_shift_segments_with_obstacles(routes, dimension, obstacles);
@@ -339,6 +356,11 @@ impl ChannelRouter {
         // Filter out shape-connected segments if option is disabled
         if !nudge_shape_connected {
             segments.retain(|seg| !seg.connected_to_shape);
+        }
+
+        // Filter out touching colinear segments if option is disabled (Task #12)
+        if !nudge_touching_colinear {
+            segments.retain(|seg| !seg.touches_colinear);
         }
 
         if segments.is_empty() {
@@ -451,6 +473,41 @@ impl ChannelRouter {
         }
     }
 
+    /// Detect touching colinear segments (Task #12)
+    fn mark_touching_colinear_segments(&self, segments: &mut [ShiftSegment], routes: &[Polygon]) {
+        for i in 0..segments.len() {
+            for j in (i + 1)..segments.len() {
+                // Skip same route
+                if segments[i].route_idx == segments[j].route_idx {
+                    continue;
+                }
+
+                // Check if same dimension and position
+                if segments[i].dimension != segments[j].dimension {
+                    continue;
+                }
+
+                let pos_i = segments[i].position;
+                let pos_j = segments[j].position;
+
+                if (pos_i - pos_j).abs() < 1e-6 {
+                    // Get segment ranges
+                    let (min_i, max_i) = segments[i].range(routes);
+                    let (min_j, max_j) = segments[j].range(routes);
+
+                    // Check if they touch end-to-end or overlap
+                    let touches = (min_i - max_j).abs() < 1e-6 || (max_i - min_j).abs() < 1e-6;
+                    let overlaps = !(max_i < min_j || max_j < min_i);
+
+                    if touches || overlaps {
+                        segments[i].touches_colinear = true;
+                        segments[j].touches_colinear = true;
+                    }
+                }
+            }
+        }
+    }
+
     /// Build shift segments with obstacle awareness using scanline algorithm
     fn build_shift_segments_with_obstacles(
         &self,
@@ -467,6 +524,9 @@ impl ChannelRouter {
 
         // Mark segments connected to shapes
         self.mark_shape_connected_segments(&mut segments, routes);
+
+        // Mark touching colinear segments (Task #12)
+        self.mark_touching_colinear_segments(&mut segments, routes);
 
         // Use scanline algorithm to compute channel limits
         self.compute_channel_limits_scanline(&mut segments, routes, dimension, obstacles);

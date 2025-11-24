@@ -845,7 +845,8 @@ impl Router {
         // Apply channel-based nudging with obstacle awareness
         let channel_router = ChannelRouter::with_nudge_distance(nudge_distance);
         let nudge_shape_connected = self.routing_option(RoutingOption::NudgeOrthogonalSegmentsConnectedToShapes);
-        channel_router.nudge_routes_with_obstacles_and_options(&mut routes, &obstacles, nudge_shape_connected);
+        let nudge_touching_colinear = self.routing_option(RoutingOption::NudgeOrthogonalTouchingColinearSegments);
+        channel_router.nudge_routes_with_obstacles_and_options(&mut routes, &obstacles, nudge_shape_connected, nudge_touching_colinear);
 
         // Update connector routes with nudged positions
         for (i, conn_id) in orthogonal_conn_ids.iter().enumerate() {

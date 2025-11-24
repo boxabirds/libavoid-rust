@@ -87,6 +87,10 @@ pub struct PathFinder {
     crossing_penalty: f64,
     /// Cost for routing away from destination
     reverse_penalty: f64,
+    /// Cost for shared paths at connector endpoints (Task #11)
+    shared_path_at_end_penalty: f64,
+    /// Whether to apply shared path penalty (controlled by routing option)
+    penalise_shared_paths_at_ends: bool,
 }
 
 impl PathFinder {
@@ -98,6 +102,8 @@ impl PathFinder {
             angle_penalty: DEFAULT_ANGLE_PENALTY,
             crossing_penalty: DEFAULT_CROSSING_PENALTY,
             reverse_penalty: DEFAULT_REVERSE_PENALTY,
+            shared_path_at_end_penalty: 0.0,
+            penalise_shared_paths_at_ends: false,
         }
     }
 
@@ -114,6 +120,16 @@ impl PathFinder {
             angle_penalty,
             crossing_penalty,
             reverse_penalty,
+            shared_path_at_end_penalty: 0.0,
+            penalise_shared_paths_at_ends: false,
+        }
+    }
+
+    /// Set whether to penalise shared paths at connector ends
+    pub fn set_penalise_shared_paths_at_ends(&mut self, enable: bool) {
+        self.penalise_shared_paths_at_ends = enable;
+        if enable && self.shared_path_at_end_penalty == 0.0 {
+            self.shared_path_at_end_penalty = 100.0; // Default penalty
         }
     }
 
