@@ -97,6 +97,8 @@ pub struct ShiftSegment {
     pub segment_type: SegmentType,
     /// Whether this is the only segment in the route (gets stronger weight)
     pub is_single_segment_route: bool,
+    /// Whether this segment is connected to a shape (endpoint segment)
+    pub connected_to_shape: bool,
     /// Variable index in VPSC solver (set during solve)
     pub variable_idx: Option<usize>,
     /// Current position
@@ -124,6 +126,7 @@ impl ShiftSegment {
             fixed: false,
             segment_type: SegmentType::Regular,  // Default, will be classified later
             is_single_segment_route: false,  // Will be set during classification
+            connected_to_shape: false,  // Will be detected during build
             variable_idx: None,
             position,
         }
@@ -147,6 +150,7 @@ impl ShiftSegment {
             fixed: true,
             segment_type: SegmentType::Fixed,
             is_single_segment_route: false,
+            connected_to_shape: false,
             variable_idx: None,
             position,
         }
@@ -301,16 +305,41 @@ impl ChannelRouter {
 
     /// Nudge routes to spread overlapping segments, respecting obstacles
     pub fn nudge_routes_with_obstacles(&self, routes: &mut [Polygon], obstacles: &[Polygon]) {
+        self.nudge_routes_with_obstacles_and_options(routes, obstacles, false);
+    }
+
+    /// Nudge routes with full control over segment filtering
+    pub fn nudge_routes_with_obstacles_and_options(
+        &self,
+        routes: &mut [Polygon],
+        obstacles: &[Polygon],
+        nudge_shape_connected: bool,
+    ) {
         // Process horizontal segments (shift in Y)
-        self.nudge_dimension_with_obstacles(routes, 0, obstacles);
+        self.nudge_dimension_with_obstacles(routes, 0, obstacles, nudge_shape_connected);
         // Process vertical segments (shift in X)
-        self.nudge_dimension_with_obstacles(routes, 1, obstacles);
+        self.nudge_dimension_with_obstacles(routes, 1, obstacles, nudge_shape_connected);
     }
 
     /// Nudge segments in one dimension, respecting obstacles
-    fn nudge_dimension_with_obstacles(&self, routes: &mut [Polygon], dimension: usize, obstacles: &[Polygon]) {
+    fn nudge_dimension_with_obstacles(
+        &self,
+        routes: &mut [Polygon],
+        dimension: usize,
+        obstacles: &[Polygon],
+        nudge_shape_connected: bool,
+    ) {
         // Build shift segments with obstacle-aware limits
         let mut segments = self.build_shift_segments_with_obstacles(routes, dimension, obstacles);
+
+        if segments.is_empty() {
+            return;
+        }
+
+        // Filter out shape-connected segments if option is disabled
+        if !nudge_shape_connected {
+            segments.retain(|seg| !seg.connected_to_shape);
+        }
 
         if segments.is_empty() {
             return;
@@ -411,6 +440,17 @@ impl ChannelRouter {
         (min_limit, max_limit)
     }
 
+    /// Detect segments connected to shapes (endpoint segments)
+    fn mark_shape_connected_segments(&self, segments: &mut [ShiftSegment], routes: &[Polygon]) {
+        for segment in segments.iter_mut() {
+            let route = &routes[segment.route_idx];
+            let route_len = route.size();
+
+            // A segment is connected to a shape if it's at the start or end of the route
+            segment.connected_to_shape = segment.low_idx == 0 || segment.high_idx >= route_len - 1;
+        }
+    }
+
     /// Build shift segments with obstacle awareness using scanline algorithm
     fn build_shift_segments_with_obstacles(
         &self,
@@ -424,6 +464,9 @@ impl ChannelRouter {
         if segments.is_empty() || obstacles.is_empty() {
             return segments;
         }
+
+        // Mark segments connected to shapes
+        self.mark_shape_connected_segments(&mut segments, routes);
 
         // Use scanline algorithm to compute channel limits
         self.compute_channel_limits_scanline(&mut segments, routes, dimension, obstacles);
