@@ -229,3 +229,85 @@ fn parity_coincident_endpoints() {
     // Should handle gracefully (either 1 point or 2 coincident points)
     assert!(route.is_some());
 }
+
+// ============================================================================
+// Parameter and Option Parity Tests
+// ============================================================================
+
+#[test]
+fn test_default_parameters_match_cpp() {
+    // Verify all default parameter values match C++ libavoid
+    // C++ Reference: libavoid/router.cpp:85-91
+    use libavoid::RoutingParameter;
+
+    let router = Router::new(0);
+
+    // Verify routing parameters match C++ defaults
+    assert_eq!(router.routing_parameter(RoutingParameter::SegmentPenalty), 10.0,
+        "SegmentPenalty should default to 10.0 (C++ router.cpp:89)");
+
+    assert_eq!(router.routing_parameter(RoutingParameter::BendPenalty), 0.0,
+        "BendPenalty should default to 0.0 (C++ implicit default)");
+
+    assert_eq!(router.routing_parameter(RoutingParameter::CrossingPenalty), 0.0,
+        "CrossingPenalty should default to 0.0 (C++ implicit default)");
+
+    assert_eq!(router.routing_parameter(RoutingParameter::ClusterCrossingPenalty), 4000.0,
+        "ClusterCrossingPenalty should default to 4000.0 (C++ router.cpp:90)");
+
+    assert_eq!(router.routing_parameter(RoutingParameter::IdealNudgingDistance), 4.0,
+        "IdealNudgingDistance should default to 4.0 (C++ router.cpp:91)");
+
+    assert_eq!(router.routing_parameter(RoutingParameter::ShapeBufferDistance), 0.0,
+        "ShapeBufferDistance should default to 0.0 (C++ implicit default)");
+
+    // Note: Other parameters (FixedSharedPathPenalty, PortDirectionPenalty, ReverseDirectionPenalty)
+    // are not set by default in C++ and will return 0.0 when queried
+}
+
+#[test]
+fn test_default_options_match_cpp() {
+    // Verify all default routing option values match C++ libavoid
+    // C++ Reference: libavoid/router.cpp:93-101
+    use libavoid::RoutingOption;
+
+    let router = Router::new(0);
+
+    // Verify routing options match C++ defaults
+    assert_eq!(router.routing_option(RoutingOption::NudgeOrthogonalRoutes), false,
+        "NudgeOrthogonalRoutes should default to false");
+
+    assert_eq!(router.routing_option(RoutingOption::ImproveHyperedgeRoutes), true,
+        "ImproveHyperedgeRoutes should default to true (C++ router.cpp:94)");
+
+    assert_eq!(router.routing_option(RoutingOption::PenalisePortDirections), false,
+        "PenalisePortDirections should default to false");
+
+    assert_eq!(router.routing_option(RoutingOption::NudgeSharedPathsWithCommonEndPoint), false,
+        "NudgeSharedPathsWithCommonEndPoint should default to false");
+
+    assert_eq!(router.routing_option(RoutingOption::NudgeOrthogonalSegmentsConnectedToShapes), false,
+        "NudgeOrthogonalSegmentsConnectedToShapes should default to false");
+
+    assert_eq!(router.routing_option(RoutingOption::PenaliseOrthogonalSharedPathsAtConnEnds), false,
+        "PenaliseOrthogonalSharedPathsAtConnEnds should default to false");
+
+    assert_eq!(router.routing_option(RoutingOption::NudgeOrthogonalTouchingColinearSegments), false,
+        "NudgeOrthogonalTouchingColinearSegments should default to false");
+
+    assert_eq!(router.routing_option(RoutingOption::PerformUnifyingNudgingPreprocessingStep), true,
+        "PerformUnifyingNudgingPreprocessingStep should default to true (C++ router.cpp:98)");
+
+    assert_eq!(router.routing_option(RoutingOption::ImproveHyperedgeRoutesMovingAddingAndDeletingJunctions), false,
+        "ImproveHyperedgeRoutesMovingAddingAndDeletingJunctions should default to false");
+}
+
+#[test]
+fn test_transaction_mode_default() {
+    // Verify transaction mode defaults to true for C++ parity
+    // C++ Reference: libavoid/router.cpp:62 (m_consolidate_actions = true)
+    let router = Router::new(0);
+
+    assert_eq!(router.transaction_use(), true,
+        "Transaction mode should default to true (C++ m_consolidate_actions = true)");
+}

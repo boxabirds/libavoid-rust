@@ -380,21 +380,22 @@ C++ has 5 routing options not present in Rust. Add them for configuration comple
 **Effort:** 1 hour
 **Complexity:** Low
 
-- [ ] #9 **Create comprehensive parameter parity test**
-  - **Location:** `tests/parity_tests.rs`
-  - **Test:** `test_default_parameters_match_cpp`
-  - **Verify all defaults:**
-    ```rust
-    assert_eq!(router.parameter(RoutingParameter::SegmentPenalty), 10.0);
-    assert_eq!(router.parameter(RoutingParameter::BendPenalty), 0.0);
-    assert_eq!(router.parameter(RoutingParameter::CrossingPenalty), 0.0);
-    assert_eq!(router.parameter(RoutingParameter::ClusterCrossingPenalty), 4000.0);
-    assert_eq!(router.parameter(RoutingParameter::IdealNudgingDistance), 4.0);
-    assert_eq!(router.parameter(RoutingParameter::ShapeBufferDistance), 0.0);
-    // ... verify all parameters
-    ```
-  - **Also verify option defaults match C++**
-  - **Document any intentional differences**
+- [x] #9 **Create comprehensive parameter parity test**
+  - **Location:** `tests/parity_tests.rs:237-313`
+  - **Tests implemented:**
+    - `test_default_parameters_match_cpp()`: Verifies all 6 routing parameter defaults
+    - `test_default_options_match_cpp()`: Verifies all 9 routing option defaults
+    - `test_transaction_mode_default()`: Verifies transaction_mode defaults to true
+  - **Verified defaults:**
+    - SegmentPenalty: 10.0 ✓
+    - BendPenalty: 0.0 ✓
+    - CrossingPenalty: 0.0 ✓
+    - ClusterCrossingPenalty: 4000.0 ✓
+    - IdealNudgingDistance: 4.0 ✓
+    - ShapeBufferDistance: 0.0 ✓
+    - All 9 routing options ✓
+    - Transaction mode: true ✓
+  - **All 3 new tests passing**
 
 ---
 
