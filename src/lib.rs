@@ -51,10 +51,13 @@ pub mod graph;
 pub mod orthogonal;
 pub mod junction;
 pub mod hyperedge;
+pub mod hyperedge_improver;  // Tasks #15-16 stub
 pub mod cluster;
+pub mod cluster_features;  // Task #17 stub
 pub mod vpsc;
 pub mod channel;
 pub mod orthogonal_visgraph;
+pub mod pin_visibility;  // Task #14 stub
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
