@@ -721,42 +721,24 @@ class ZombieGame {
     this.lightningCount--;
     this.zapInProgress = true;
 
-    // Create lightning bolt paths from player to each zombie
-    const lightningPaths = [];
-    for (const zombie of this.zombies) {
-      // Get the existing path from zombie to player (reverse it)
-      const pathPoints = [...zombie.path].reverse();
-      if (pathPoints.length < 2) {
-        // Fallback: direct line
-        pathPoints.push({ x: this.player.x, y: this.player.y });
-        pathPoints.push({ x: zombie.x, y: zombie.y });
-      }
+    // Animation constants
+    const WAVE_DURATION_MS = 400; // Total time for wave to travel
+    const ANIMATION_FPS = 60;
+    const FRAME_DURATION_MS = 1000 / ANIMATION_FPS;
 
-      // Create glowing lightning path element
-      const pathEl = document.createElementNS(SVG_NS, 'path');
-      let d = `M ${pathPoints[0].x} ${pathPoints[0].y}`;
-      for (let i = 1; i < pathPoints.length; i++) {
-        d += ` L ${pathPoints[i].x} ${pathPoints[i].y}`;
-      }
-      pathEl.setAttribute('d', d);
-      pathEl.setAttribute('fill', 'none');
-      pathEl.setAttribute('stroke', '#ffff00');
-      pathEl.setAttribute('stroke-width', '4');
-      pathEl.setAttribute('filter', 'url(#glow)');
-      pathEl.classList.add('lightning-bolt');
-      this.svg.appendChild(pathEl);
-      lightningPaths.push(pathEl);
-
-      // Mark zombie as being zapped
-      zombie.zapped = true;
-      zombie.zapTime = 0;
-    }
-
-    // Add glow filter if not exists
-    if (!document.getElementById('glow')) {
+    // Add SVG filters if not exists
+    if (!document.getElementById('lightning-filters')) {
       const defs = document.createElementNS(SVG_NS, 'defs');
+      defs.id = 'lightning-filters';
       defs.innerHTML = `
-        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+        <filter id="glow-white" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">
           <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
           <feMerge>
             <feMergeNode in="coloredBlur"/>
@@ -767,37 +749,192 @@ class ZombieGame {
       this.svg.insertBefore(defs, this.svg.firstChild);
     }
 
-    // Store paths for cleanup
-    this.lightningPathElements = lightningPaths;
-
-    // After a short delay, show zombies on fire
-    setTimeout(() => {
-      // Remove lightning paths
-      for (const path of this.lightningPathElements) {
-        path.remove();
+    // Find the closest zombie
+    let closestZombie = null;
+    let closestDistance = Infinity;
+    for (const zombie of this.zombies) {
+      const dist = this.distance(this.player, zombie);
+      if (dist < closestDistance) {
+        closestDistance = dist;
+        closestZombie = zombie;
       }
-      this.lightningPathElements = [];
+    }
 
-      // Change zombie emoji to fire
-      for (const zombie of this.zombies) {
-        if (zombie.element && zombie.zapped) {
-          zombie.element.textContent = EMOJI_ZAP;
+    if (!closestZombie) {
+      this.zapInProgress = false;
+      return;
+    }
+
+    // Create lightning data for the closest zombie only
+    const lightningData = [];
+    {
+      const zombie = closestZombie;
+      // Get the existing path from zombie to player (reverse it)
+      const pathPoints = [...zombie.path].reverse();
+      if (pathPoints.length < 2) {
+        // Fallback: direct line
+        pathPoints.length = 0;
+        pathPoints.push({ x: this.player.x, y: this.player.y });
+        pathPoints.push({ x: zombie.x, y: zombie.y });
+      }
+
+      // Calculate total path length
+      let totalLength = 0;
+      for (let i = 1; i < pathPoints.length; i++) {
+        totalLength += this.distance(pathPoints[i - 1], pathPoints[i]);
+      }
+
+      // Create path string
+      let d = `M ${pathPoints[0].x} ${pathPoints[0].y}`;
+      for (let i = 1; i < pathPoints.length; i++) {
+        d += ` L ${pathPoints[i].x} ${pathPoints[i].y}`;
+      }
+
+      // Create contrail layer (stays behind as dark red/orange)
+      const contrailEl = document.createElementNS(SVG_NS, 'path');
+      contrailEl.setAttribute('d', d);
+      contrailEl.setAttribute('fill', 'none');
+      contrailEl.setAttribute('stroke', '#8B0000');
+      contrailEl.setAttribute('stroke-width', '3');
+      contrailEl.setAttribute('stroke-linecap', 'round');
+      contrailEl.setAttribute('stroke-dasharray', totalLength);
+      contrailEl.setAttribute('stroke-dashoffset', totalLength);
+      contrailEl.setAttribute('filter', 'url(#glow-red)');
+      this.svg.appendChild(contrailEl);
+
+      // Create main lightning wave (the bright moving front)
+      const waveEl = document.createElementNS(SVG_NS, 'path');
+      waveEl.setAttribute('d', d);
+      waveEl.setAttribute('fill', 'none');
+      waveEl.setAttribute('stroke', '#ffffff');
+      waveEl.setAttribute('stroke-width', '6');
+      waveEl.setAttribute('stroke-linecap', 'round');
+      waveEl.setAttribute('stroke-dasharray', totalLength);
+      waveEl.setAttribute('stroke-dashoffset', totalLength);
+      waveEl.setAttribute('filter', 'url(#glow-white)');
+      this.svg.appendChild(waveEl);
+
+      // Create white-hot core (smaller, brightest part)
+      const coreEl = document.createElementNS(SVG_NS, 'path');
+      coreEl.setAttribute('d', d);
+      coreEl.setAttribute('fill', 'none');
+      coreEl.setAttribute('stroke', '#ffffff');
+      coreEl.setAttribute('stroke-width', '2');
+      coreEl.setAttribute('stroke-linecap', 'round');
+      coreEl.setAttribute('stroke-dasharray', totalLength);
+      coreEl.setAttribute('stroke-dashoffset', totalLength);
+      coreEl.setAttribute('filter', 'url(#glow-white)');
+      this.svg.appendChild(coreEl);
+
+      lightningData.push({
+        zombie,
+        pathPoints,
+        totalLength,
+        contrailEl,
+        waveEl,
+        coreEl
+      });
+
+      // Mark zombie as being zapped
+      zombie.zapped = true;
+    }
+
+    // Animate the lightning wave using stroke-dashoffset from end to start
+    const startTime = performance.now();
+
+    const animateLightning = (currentTime) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / WAVE_DURATION_MS, 1);
+
+      for (const data of lightningData) {
+        // All paths start hidden (dashoffset = totalLength) and reveal by reducing offset
+        const revealed = progress * data.totalLength;
+        const hidden = data.totalLength - revealed;
+
+        // Contrail: reveals as wave passes, stays visible
+        data.contrailEl.setAttribute('stroke-dashoffset', hidden);
+
+        // Wave: reveals slightly ahead of contrail
+        const waveRevealed = Math.min(data.totalLength, revealed * 1.1);
+        data.waveEl.setAttribute('stroke-dashoffset', data.totalLength - waveRevealed);
+
+        // Fade wave opacity as it reveals (bright at front, fading behind)
+        const waveOpacity = 0.3 + 0.7 * (1 - progress);
+        data.waveEl.setAttribute('opacity', waveOpacity);
+
+        // Core: at the leading edge, reveals fastest
+        const coreRevealed = Math.min(data.totalLength, revealed * 1.2);
+        data.coreEl.setAttribute('stroke-dashoffset', data.totalLength - coreRevealed);
+
+        // Color transition for wave: white-hot at start, cooling to orange/red
+        const hue = progress * 30; // 0 (red) to 30 (orange)
+        const lightness = 100 - progress * 50; // 100% (white) to 50% (saturated)
+        data.waveEl.setAttribute('stroke', `hsl(${hue}, 100%, ${lightness}%)`);
+      }
+
+      if (progress < 1) {
+        requestAnimationFrame(animateLightning);
+      } else {
+        // Wave complete - show zombies on fire
+        this.finishLightningStrike(lightningData);
+      }
+    };
+
+    requestAnimationFrame(animateLightning);
+  }
+
+  finishLightningStrike(lightningData) {
+    // Brief flash at impact - make everything white hot
+    for (const data of lightningData) {
+      data.waveEl.setAttribute('stroke', '#ffffff');
+      data.waveEl.setAttribute('opacity', '1');
+      data.coreEl.setAttribute('stroke', '#ffffff');
+      if (data.zombie.element) {
+        data.zombie.element.textContent = EMOJI_ZAP;
+      }
+    }
+
+    // Fade out and remove elements
+    const FADE_DURATION_MS = 300;
+    const fadeStartTime = performance.now();
+
+    const fadeOut = (currentTime) => {
+      const elapsed = currentTime - fadeStartTime;
+      const fadeProgress = Math.min(elapsed / FADE_DURATION_MS, 1);
+
+      for (const data of lightningData) {
+        const opacity = 1 - fadeProgress;
+        data.contrailEl.setAttribute('opacity', opacity);
+        data.waveEl.setAttribute('opacity', opacity);
+        data.coreEl.setAttribute('opacity', opacity);
+      }
+
+      if (fadeProgress < 1) {
+        requestAnimationFrame(fadeOut);
+      } else {
+        // Remove all lightning elements
+        for (const data of lightningData) {
+          data.contrailEl.remove();
+          data.waveEl.remove();
+          data.coreEl.remove();
         }
-      }
 
-      // After ZAP_DURATION, remove zombies
-      setTimeout(() => {
-        // Remove all zapped zombies
-        for (const zombie of this.zombies) {
-          if (zombie.zapped) {
-            if (zombie.element) zombie.element.remove();
-            if (zombie.pathElement) zombie.pathElement.remove();
+        // After ZAP_DURATION, remove zombies
+        setTimeout(() => {
+          for (const zombie of this.zombies) {
+            if (zombie.zapped) {
+              if (zombie.element) zombie.element.remove();
+              if (zombie.pathElement) zombie.pathElement.remove();
+            }
           }
-        }
-        this.zombies = this.zombies.filter(z => !z.zapped);
-        this.zapInProgress = false;
-      }, ZAP_DURATION * 1000);
-    }, 200); // Lightning visible for 200ms
+          this.zombies = this.zombies.filter(z => !z.zapped);
+          this.zapInProgress = false;
+        }, ZAP_DURATION * 1000);
+      }
+    };
+
+    // Start fade after brief flash
+    setTimeout(() => requestAnimationFrame(fadeOut), 100);
   }
 
   debugDropRocket() {
