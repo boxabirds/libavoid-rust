@@ -104,6 +104,41 @@
       letter-spacing: 1px;
     }
 
+    .rocket-stat {
+      width: 100%;
+      justify-content: center;
+      margin-bottom: 5px;
+    }
+
+    .rocket-bar {
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+
+    .lightning-stat {
+      width: 100%;
+      justify-content: center;
+      margin-bottom: 5px;
+    }
+
+    .lightning-bar {
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+
+    .boost-timer {
+      margin-left: 10px;
+      color: #ffd700;
+      font-weight: bold;
+      font-size: 16px;
+      animation: pulse 0.5s ease-in-out infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { opacity: 0.7; }
+      to { opacity: 1; }
+    }
+
     .debug-controls {
       margin-top: 15px;
       display: flex;
@@ -192,7 +227,7 @@
 <body>
   <h1>Zombie Chase</h1>
   <div class="instructions">
-    Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> keys. Collect 🍎 for health. Survive each round!
+    Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd>. Collect 🍎 for health. Press <kbd>Space</kbd> to use 🚀 for 2x speed! Press <kbd>E</kbd> to use ⚡ to zap all zombies!
   </div>
 
   <div id="loading">Loading WASM module...</div>
@@ -213,6 +248,15 @@
     <div class="stat health-stat">
       <span class="label">Health:</span>
       <span id="health-bar" class="health-bar"></span>
+    </div>
+    <div class="stat rocket-stat">
+      <span class="label">Rockets:</span>
+      <span id="rocket-bar" class="rocket-bar"></span>
+      <span id="boost-timer" class="boost-timer" style="display: none;"></span>
+    </div>
+    <div class="stat lightning-stat">
+      <span class="label">Zaps:</span>
+      <span id="lightning-bar" class="lightning-bar"></span>
     </div>
     <div class="stat" id="round">
       <span class="label">Round:</span>

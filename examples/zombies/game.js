@@ -17,12 +17,11 @@ import init, {
 // Game constants
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
-const OBSTACLE_COUNT = 20;
 const OBSTACLE_MIN_SIZE = 40;
 const OBSTACLE_MAX_SIZE = 100;
 const PLAYER_SPEED = 150; // pixels per second
 const BASE_ZOMBIE_SPEED = 50;  // pixels per second
-const ZOMBIE_SPEED_VARIATION = 0.05; // +/- 5% speed variation per zombie
+const ZOMBIE_SPEED_VARIATION = 0.10; // +/- 10% speed variation per zombie
 const BASE_ROUND_DURATION = 10; // seconds for round 1
 const ROUND_TIME_INCREMENT = 5; // additional seconds per round
 const ZOMBIE_SPEED_MULTIPLIER = 1.10; // 10% faster each round
@@ -54,8 +53,35 @@ const ZOMBIE_EMOJIS = [
 // Apple emoji
 const EMOJI_APPLE = '\u{1F34E}';  // 🍎
 
+// Rocket powerup (speed boost)
+const EMOJI_ROCKET = '\u{1F680}';  // 🚀
+const ROCKET_SIZE = 20;
+const ROCKET_COLLECT_DISTANCE = 25;
+const ROCKET_START_ROUND = 7; // Rockets start appearing at round 7
+const MAX_ROCKETS = 20; // Max rockets player can hold
+const SPEED_BOOST_MULTIPLIER = 2; // 2x speed when boost active
+const SPEED_BOOST_DURATION = 5; // seconds
+
+// Lightning strike powerup (kills all zombies)
+const EMOJI_LIGHTNING = '\u{26A1}';  // ⚡
+const EMOJI_ZAP = '\u{1F525}';  // 🔥
+const LIGHTNING_SIZE = 20;
+const LIGHTNING_COLLECT_DISTANCE = 25;
+const LIGHTNING_START_ROUND = 10; // Lightning starts appearing at round 10
+const MAX_LIGHTNING = 20; // Max lightning player can hold
+const ZAP_DURATION = 1; // seconds zombies show fire before dying
+
 const SPAWN_MARGIN = 50;
-const MIN_SPAWN_DISTANCE = 150; // Minimum distance between player and zombie spawn
+const BASE_SPAWN_DISTANCE = 150; // Minimum distance between player and zombie spawn (round 1)
+const SPAWN_DISTANCE_REDUCTION = 5; // Reduce min spawn distance by this much each round
+const MIN_SPAWN_DISTANCE_FLOOR = 50; // Never reduce spawn distance below this
+
+// Obstacles reduce by 1 each round
+const BASE_OBSTACLE_COUNT = 20;
+const MIN_OBSTACLE_COUNT = 5; // Never go below this many obstacles
+
+// Zombie separation
+const ZOMBIE_SEPARATION_DISTANCE = 30; // Minimum distance between zombies
 
 // Routing constants
 const POLY_LINE_ROUTING = 1;
@@ -80,6 +106,8 @@ class ZombieGame {
     this.player = { x: 0, y: 0 };
     this.zombies = []; // Array of zombie objects
     this.apples = []; // Collectible apples on the map
+    this.rockets = []; // Rockets on the map (speed boost)
+    this.lightningPickups = []; // Lightning pickups on the map (zap attack)
 
     this.keysPressed = new Set();
     this.gameRunning = false;
@@ -89,6 +117,11 @@ class ZombieGame {
 
     this.round = 1;
     this.health = STARTING_HEALTH;
+    this.rocketCount = 0; // Collected rockets for speed boost
+    this.lightningCount = 0; // Collected lightning for zap attack
+    this.speedBoostRemaining = 0; // Seconds of speed boost left
+    this.zapInProgress = false; // Whether lightning strike animation is playing
+    this.zappedZombies = []; // Zombies being zapped
     this.showPaths = true; // Debug paths on by default
 
     this.svg = null;
@@ -126,15 +159,40 @@ class ZombieGame {
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         this.keysPressed.add('d');
-      } else if (e.key === ' ' || e.key === 'Enter') {
-        // Space or Enter to advance from round complete screen
+      } else if (e.key === ' ') {
         e.preventDefault();
-        if (!this.gameRunning && this.countdownTimer) {
+        if (this.gameRunning) {
+          // During gameplay: activate speed boost if player has lightning
+          this.activateSpeedBoost();
+        } else if (this.countdownTimer) {
           // Round complete - advance to next round
           this.nextRound();
-        } else if (!this.gameRunning) {
+        } else {
           // Game over - restart
           this.restart();
+        }
+      } else if (e.key === 'Enter') {
+        // Enter to advance from round complete screen or restart
+        e.preventDefault();
+        if (!this.gameRunning && this.countdownTimer) {
+          this.nextRound();
+        } else if (!this.gameRunning) {
+          this.restart();
+        }
+      } else if (key === 'b') {
+        // Debug: drop a rocket
+        if (this.gameRunning) {
+          this.debugDropRocket();
+        }
+      } else if (key === 'l') {
+        // Debug: drop a lightning pickup
+        if (this.gameRunning) {
+          this.debugDropLightning();
+        }
+      } else if (key === 'e') {
+        // Activate lightning strike (zap all zombies)
+        if (this.gameRunning) {
+          this.activateLightningStrike();
         }
       }
     });
@@ -172,6 +230,11 @@ class ZombieGame {
     this.clearCountdownTimer();
     this.round = 1;
     this.health = STARTING_HEALTH;
+    this.rocketCount = 0;
+    this.lightningCount = 0;
+    this.speedBoostRemaining = 0;
+    this.zapInProgress = false;
+    this.zappedZombies = [];
     this.startRound();
   }
 
@@ -188,6 +251,10 @@ class ZombieGame {
     this.generateObstacles();
     this.spawnEntities();
     this.spawnApples();
+    this.spawnRockets();
+    this.spawnLightningPickups();
+    this.zapInProgress = false;
+    this.zappedZombies = [];
     this.drawObstacles();
     this.createEntityElements();
     this.updateAllPaths();
@@ -221,7 +288,10 @@ class ZombieGame {
   generateObstacles() {
     this.obstacles = [];
 
-    for (let i = 0; i < OBSTACLE_COUNT; i++) {
+    // Reduce obstacles by 1 each round, but never below minimum
+    const obstacleCount = Math.max(MIN_OBSTACLE_COUNT, BASE_OBSTACLE_COUNT - (this.round - 1));
+
+    for (let i = 0; i < obstacleCount; i++) {
       let obstacle;
       let attempts = 0;
       const maxAttempts = 100;
@@ -270,6 +340,12 @@ class ZombieGame {
     // Spawn player
     this.player = this.findSpawnPoint();
 
+    // Calculate min spawn distance for this round (reduces each round)
+    const minSpawnDistance = Math.max(
+      MIN_SPAWN_DISTANCE_FLOOR,
+      BASE_SPAWN_DISTANCE - (this.round - 1) * SPAWN_DISTANCE_REDUCTION
+    );
+
     // Spawn zombies (one per round)
     this.zombies = [];
     const zombieCount = this.round;
@@ -281,9 +357,14 @@ class ZombieGame {
       do {
         pos = this.findSpawnPoint();
         attempts++;
-      } while (this.distance(this.player, pos) < MIN_SPAWN_DISTANCE && attempts < 100);
+        // Check distance from player AND from other zombies
+      } while (
+        (this.distance(this.player, pos) < minSpawnDistance ||
+         this.tooCloseToOtherZombies(pos)) &&
+        attempts < 100
+      );
 
-      // Each zombie gets +/- 5% speed variation
+      // Each zombie gets +/- 10% speed variation
       const speedVariation = 1 + (Math.random() * 2 - 1) * ZOMBIE_SPEED_VARIATION;
       const zombieSpeed = baseSpeed * speedVariation;
 
@@ -305,6 +386,45 @@ class ZombieGame {
     }
   }
 
+  tooCloseToOtherZombies(pos) {
+    for (const zombie of this.zombies) {
+      if (this.distance(pos, zombie) < ZOMBIE_SEPARATION_DISTANCE) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  separateZombies() {
+    // Push overlapping zombies apart
+    for (let i = 0; i < this.zombies.length; i++) {
+      for (let j = i + 1; j < this.zombies.length; j++) {
+        const z1 = this.zombies[i];
+        const z2 = this.zombies[j];
+        const dist = this.distance(z1, z2);
+
+        if (dist < ZOMBIE_SEPARATION_DISTANCE && dist > 0) {
+          // Calculate push direction
+          const dx = z2.x - z1.x;
+          const dy = z2.y - z1.y;
+          const overlap = ZOMBIE_SEPARATION_DISTANCE - dist;
+          const pushX = (dx / dist) * overlap * 0.5;
+          const pushY = (dy / dist) * overlap * 0.5;
+
+          // Push both zombies apart (if not inside obstacle)
+          if (!this.isInsideObstacle(z1.x - pushX, z1.y - pushY)) {
+            z1.x -= pushX;
+            z1.y -= pushY;
+          }
+          if (!this.isInsideObstacle(z2.x + pushX, z2.y + pushY)) {
+            z2.x += pushX;
+            z2.y += pushY;
+          }
+        }
+      }
+    }
+  }
+
   spawnApples() {
     this.apples = [];
     // Number of apples is round +/- 1
@@ -320,6 +440,84 @@ class ZombieGame {
         element: null
       });
     }
+  }
+
+  spawnRockets() {
+    this.rockets = [];
+
+    // Rockets only appear from round 7 onwards
+    if (this.round < ROCKET_START_ROUND) return;
+
+    // Number of rockets is 1 +/- 1 (so 0, 1, or 2), minimum 0
+    const baseCount = 1;
+    const variation = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+    const rocketCount = Math.max(0, baseCount + variation);
+
+    for (let i = 0; i < rocketCount; i++) {
+      let pos;
+      let attempts = 0;
+      // Find position that doesn't overlap with apples
+      do {
+        pos = this.findSpawnPoint();
+        attempts++;
+      } while (this.tooCloseToPickups(pos) && attempts < 100);
+
+      this.rockets.push({
+        x: pos.x,
+        y: pos.y,
+        element: null
+      });
+    }
+  }
+
+  spawnLightningPickups() {
+    this.lightningPickups = [];
+
+    // Lightning only appears from round 10 onwards
+    if (this.round < LIGHTNING_START_ROUND) return;
+
+    // Number of lightning is 1 +/- 1 (so 0, 1, or 2), minimum 0
+    const baseCount = 1;
+    const variation = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+    const lightningCount = Math.max(0, baseCount + variation);
+
+    for (let i = 0; i < lightningCount; i++) {
+      let pos;
+      let attempts = 0;
+      // Find position that doesn't overlap with other pickups
+      do {
+        pos = this.findSpawnPoint();
+        attempts++;
+      } while (this.tooCloseToPickups(pos) && attempts < 100);
+
+      this.lightningPickups.push({
+        x: pos.x,
+        y: pos.y,
+        element: null
+      });
+    }
+  }
+
+  tooCloseToPickups(pos) {
+    // Check apples
+    for (const apple of this.apples) {
+      if (this.distance(pos, apple) < APPLE_COLLECT_DISTANCE * 2) {
+        return true;
+      }
+    }
+    // Check rockets
+    for (const rocket of this.rockets) {
+      if (this.distance(pos, rocket) < ROCKET_COLLECT_DISTANCE * 2) {
+        return true;
+      }
+    }
+    // Check lightning pickups
+    for (const lightning of this.lightningPickups) {
+      if (this.distance(pos, lightning) < LIGHTNING_COLLECT_DISTANCE * 2) {
+        return true;
+      }
+    }
+    return false;
   }
 
   findSpawnPoint() {
@@ -430,8 +628,23 @@ class ZombieGame {
       }
     }
 
+    // Separate overlapping zombies
+    this.separateZombies();
+
     // Check apple collection
     this.checkAppleCollection();
+
+    // Check rocket collection (speed boost)
+    this.checkRocketCollection();
+
+    // Check lightning pickup collection (zap attack)
+    this.checkLightningCollection();
+
+    // Update speed boost timer
+    if (this.speedBoostRemaining > 0) {
+      this.speedBoostRemaining -= deltaTime;
+      if (this.speedBoostRemaining < 0) this.speedBoostRemaining = 0;
+    }
 
     // Update UI
     this.updateHUD();
@@ -457,6 +670,194 @@ class ZombieGame {
     }
   }
 
+  checkRocketCollection() {
+    for (let i = this.rockets.length - 1; i >= 0; i--) {
+      const rocket = this.rockets[i];
+      if (this.distance(this.player, rocket) < ROCKET_COLLECT_DISTANCE) {
+        // Collect the rocket (up to max)
+        if (this.rocketCount < MAX_ROCKETS) {
+          this.rocketCount++;
+        }
+        // Remove from array and SVG
+        if (rocket.element) {
+          rocket.element.remove();
+        }
+        this.rockets.splice(i, 1);
+      }
+    }
+  }
+
+  checkLightningCollection() {
+    for (let i = this.lightningPickups.length - 1; i >= 0; i--) {
+      const lightning = this.lightningPickups[i];
+      if (this.distance(this.player, lightning) < LIGHTNING_COLLECT_DISTANCE) {
+        // Collect the lightning (up to max)
+        if (this.lightningCount < MAX_LIGHTNING) {
+          this.lightningCount++;
+        }
+        // Remove from array and SVG
+        if (lightning.element) {
+          lightning.element.remove();
+        }
+        this.lightningPickups.splice(i, 1);
+      }
+    }
+  }
+
+  activateSpeedBoost() {
+    // Only activate if player has rocket and boost isn't already active
+    if (this.rocketCount > 0 && this.speedBoostRemaining <= 0) {
+      this.rocketCount--;
+      this.speedBoostRemaining = SPEED_BOOST_DURATION;
+    }
+  }
+
+  activateLightningStrike() {
+    // Only activate if player has lightning and no zap in progress
+    if (this.lightningCount <= 0 || this.zapInProgress || this.zombies.length === 0) {
+      return;
+    }
+
+    this.lightningCount--;
+    this.zapInProgress = true;
+
+    // Create lightning bolt paths from player to each zombie
+    const lightningPaths = [];
+    for (const zombie of this.zombies) {
+      // Get the existing path from zombie to player (reverse it)
+      const pathPoints = [...zombie.path].reverse();
+      if (pathPoints.length < 2) {
+        // Fallback: direct line
+        pathPoints.push({ x: this.player.x, y: this.player.y });
+        pathPoints.push({ x: zombie.x, y: zombie.y });
+      }
+
+      // Create glowing lightning path element
+      const pathEl = document.createElementNS(SVG_NS, 'path');
+      let d = `M ${pathPoints[0].x} ${pathPoints[0].y}`;
+      for (let i = 1; i < pathPoints.length; i++) {
+        d += ` L ${pathPoints[i].x} ${pathPoints[i].y}`;
+      }
+      pathEl.setAttribute('d', d);
+      pathEl.setAttribute('fill', 'none');
+      pathEl.setAttribute('stroke', '#ffff00');
+      pathEl.setAttribute('stroke-width', '4');
+      pathEl.setAttribute('filter', 'url(#glow)');
+      pathEl.classList.add('lightning-bolt');
+      this.svg.appendChild(pathEl);
+      lightningPaths.push(pathEl);
+
+      // Mark zombie as being zapped
+      zombie.zapped = true;
+      zombie.zapTime = 0;
+    }
+
+    // Add glow filter if not exists
+    if (!document.getElementById('glow')) {
+      const defs = document.createElementNS(SVG_NS, 'defs');
+      defs.innerHTML = `
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      `;
+      this.svg.insertBefore(defs, this.svg.firstChild);
+    }
+
+    // Store paths for cleanup
+    this.lightningPathElements = lightningPaths;
+
+    // After a short delay, show zombies on fire
+    setTimeout(() => {
+      // Remove lightning paths
+      for (const path of this.lightningPathElements) {
+        path.remove();
+      }
+      this.lightningPathElements = [];
+
+      // Change zombie emoji to fire
+      for (const zombie of this.zombies) {
+        if (zombie.element && zombie.zapped) {
+          zombie.element.textContent = EMOJI_ZAP;
+        }
+      }
+
+      // After ZAP_DURATION, remove zombies
+      setTimeout(() => {
+        // Remove all zapped zombies
+        for (const zombie of this.zombies) {
+          if (zombie.zapped) {
+            if (zombie.element) zombie.element.remove();
+            if (zombie.pathElement) zombie.pathElement.remove();
+          }
+        }
+        this.zombies = this.zombies.filter(z => !z.zapped);
+        this.zapInProgress = false;
+      }, ZAP_DURATION * 1000);
+    }, 200); // Lightning visible for 200ms
+  }
+
+  debugDropRocket() {
+    // Debug: spawn a rocket at a random valid position
+    let pos;
+    let attempts = 0;
+    do {
+      pos = this.findSpawnPoint();
+      attempts++;
+    } while (this.tooCloseToPickups(pos) && attempts < 100);
+
+    const rocket = {
+      x: pos.x,
+      y: pos.y,
+      element: null
+    };
+
+    // Create SVG element for the rocket
+    const el = document.createElementNS(SVG_NS, 'text');
+    el.setAttribute('font-size', ROCKET_SIZE);
+    el.setAttribute('text-anchor', 'middle');
+    el.setAttribute('dominant-baseline', 'central');
+    el.setAttribute('x', rocket.x);
+    el.setAttribute('y', rocket.y);
+    el.textContent = EMOJI_ROCKET;
+    this.svg.appendChild(el);
+    rocket.element = el;
+
+    this.rockets.push(rocket);
+  }
+
+  debugDropLightning() {
+    // Debug: spawn a lightning pickup at a random valid position
+    let pos;
+    let attempts = 0;
+    do {
+      pos = this.findSpawnPoint();
+      attempts++;
+    } while (this.tooCloseToPickups(pos) && attempts < 100);
+
+    const lightning = {
+      x: pos.x,
+      y: pos.y,
+      element: null
+    };
+
+    // Create SVG element for the lightning
+    const el = document.createElementNS(SVG_NS, 'text');
+    el.setAttribute('font-size', LIGHTNING_SIZE);
+    el.setAttribute('text-anchor', 'middle');
+    el.setAttribute('dominant-baseline', 'central');
+    el.setAttribute('x', lightning.x);
+    el.setAttribute('y', lightning.y);
+    el.textContent = EMOJI_LIGHTNING;
+    this.svg.appendChild(el);
+    lightning.element = el;
+
+    this.lightningPickups.push(lightning);
+  }
+
   updatePlayer(deltaTime) {
     let dx = 0;
     let dy = 0;
@@ -473,8 +874,12 @@ class ZombieGame {
       dy /= len;
     }
 
-    const newX = this.player.x + dx * PLAYER_SPEED * deltaTime;
-    const newY = this.player.y + dy * PLAYER_SPEED * deltaTime;
+    // Apply speed boost if active
+    const speedMultiplier = this.speedBoostRemaining > 0 ? SPEED_BOOST_MULTIPLIER : 1;
+    const currentSpeed = PLAYER_SPEED * speedMultiplier;
+
+    const newX = this.player.x + dx * currentSpeed * deltaTime;
+    const newY = this.player.y + dy * currentSpeed * deltaTime;
 
     // Check bounds and obstacles
     const moved = this.tryMove(this.player, newX, newY);
@@ -611,6 +1016,32 @@ class ZombieGame {
       apple.element = el;
     }
 
+    // Create rocket elements (speed boost)
+    for (const rocket of this.rockets) {
+      const el = document.createElementNS(SVG_NS, 'text');
+      el.setAttribute('font-size', ROCKET_SIZE);
+      el.setAttribute('text-anchor', 'middle');
+      el.setAttribute('dominant-baseline', 'central');
+      el.setAttribute('x', rocket.x);
+      el.setAttribute('y', rocket.y);
+      el.textContent = EMOJI_ROCKET;
+      this.svg.appendChild(el);
+      rocket.element = el;
+    }
+
+    // Create lightning pickup elements (zap attack)
+    for (const lightning of this.lightningPickups) {
+      const el = document.createElementNS(SVG_NS, 'text');
+      el.setAttribute('font-size', LIGHTNING_SIZE);
+      el.setAttribute('text-anchor', 'middle');
+      el.setAttribute('dominant-baseline', 'central');
+      el.setAttribute('x', lightning.x);
+      el.setAttribute('y', lightning.y);
+      el.textContent = EMOJI_LIGHTNING;
+      this.svg.appendChild(el);
+      lightning.element = el;
+    }
+
     // Player (drawn last, on top)
     this.playerElement = document.createElementNS(SVG_NS, 'text');
     this.playerElement.setAttribute('font-size', ENTITY_SIZE);
@@ -689,6 +1120,45 @@ class ZombieGame {
         }
       }
       healthBar.textContent = healthDisplay;
+    }
+
+    // Update rocket/speed boost display
+    const rocketBar = document.getElementById('rocket-bar');
+    if (rocketBar) {
+      let rocketDisplay = '';
+      for (let i = 0; i < MAX_ROCKETS; i++) {
+        if (i < this.rocketCount) {
+          rocketDisplay += EMOJI_ROCKET;
+        } else {
+          rocketDisplay += '\u{25CB}'; // ○ empty circle for empty slots
+        }
+      }
+      rocketBar.textContent = rocketDisplay;
+    }
+
+    // Update lightning/zap display
+    const lightningBar = document.getElementById('lightning-bar');
+    if (lightningBar) {
+      let lightningDisplay = '';
+      for (let i = 0; i < MAX_LIGHTNING; i++) {
+        if (i < this.lightningCount) {
+          lightningDisplay += EMOJI_LIGHTNING;
+        } else {
+          lightningDisplay += '\u{25CB}'; // ○ empty circle for empty slots
+        }
+      }
+      lightningBar.textContent = lightningDisplay;
+    }
+
+    // Update boost timer
+    const boostTimer = document.getElementById('boost-timer');
+    if (boostTimer) {
+      if (this.speedBoostRemaining > 0) {
+        boostTimer.textContent = `BOOST: ${this.speedBoostRemaining.toFixed(1)}s`;
+        boostTimer.style.display = 'inline';
+      } else {
+        boostTimer.style.display = 'none';
+      }
     }
   }
 
