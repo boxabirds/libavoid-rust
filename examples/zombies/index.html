@@ -55,15 +55,17 @@
 
     #hud {
       display: flex;
-      gap: 30px;
+      gap: 20px;
       margin-top: 15px;
-      font-size: 18px;
+      font-size: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
     }
 
     #hud .stat {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     #hud .label {
@@ -72,15 +74,42 @@
 
     #hud .value {
       font-weight: bold;
-      font-size: 24px;
+      font-size: 20px;
     }
 
     #timer .value {
       color: #4ecca3;
     }
 
-    #distance .value {
+    #round .value {
       color: #ffd369;
+    }
+
+    #zombies .value {
+      color: #e94560;
+    }
+
+    #distance .value {
+      color: #74b9ff;
+    }
+
+    .debug-controls {
+      margin-top: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #888;
+      font-size: 14px;
+    }
+
+    .debug-controls input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+
+    .debug-controls label {
+      cursor: pointer;
     }
 
     #game-over {
@@ -96,8 +125,8 @@
     }
 
     #game-over h2 {
-      font-size: 48px;
-      margin-bottom: 20px;
+      font-size: 36px;
+      margin-bottom: 15px;
     }
 
     #game-over.win h2 {
@@ -109,17 +138,23 @@
     }
 
     #game-over p {
-      font-size: 18px;
+      font-size: 16px;
       margin-bottom: 20px;
       color: #aaa;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
     }
 
     button {
       background: #e94560;
       color: white;
       border: none;
-      padding: 12px 30px;
-      font-size: 18px;
+      padding: 12px 24px;
+      font-size: 16px;
       border-radius: 6px;
       cursor: pointer;
       transition: background 0.2s;
@@ -127,6 +162,14 @@
 
     button:hover {
       background: #ff6b6b;
+    }
+
+    button.secondary {
+      background: #3d5a80;
+    }
+
+    button.secondary:hover {
+      background: #4a6fa5;
     }
 
     #loading {
@@ -138,7 +181,7 @@
 <body>
   <h1>Zombie Chase</h1>
   <div class="instructions">
-    Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> keys. Survive for 30 seconds!
+    Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> keys. Survive each round!
   </div>
 
   <div id="loading">Loading WASM module...</div>
@@ -148,19 +191,35 @@
     <div id="game-over">
       <h2 id="result-text"></h2>
       <p id="result-message"></p>
-      <button onclick="game.restart()">Play Again</button>
+      <div class="button-row">
+        <button id="continue-btn" onclick="game.nextRound()">Next Round</button>
+        <button id="restart-btn" class="secondary" onclick="game.restart()">Play Again</button>
+      </div>
     </div>
   </div>
 
   <div id="hud" style="display: none;">
+    <div class="stat" id="round">
+      <span class="label">Round:</span>
+      <span class="value" id="round-value">1</span>
+    </div>
     <div class="stat" id="timer">
-      <span class="label">Time Left:</span>
-      <span class="value" id="time-value">30.0</span>
+      <span class="label">Time:</span>
+      <span class="value" id="time-value">10.0</span>
+    </div>
+    <div class="stat" id="zombies">
+      <span class="label">Zombies:</span>
+      <span class="value" id="zombies-value">1</span>
     </div>
     <div class="stat" id="distance">
-      <span class="label">Distance:</span>
+      <span class="label">Nearest:</span>
       <span class="value" id="distance-value">0</span>
     </div>
+  </div>
+
+  <div class="debug-controls">
+    <input type="checkbox" id="show-paths" checked>
+    <label for="show-paths">Debug: show connector paths</label>
   </div>
 
   <script type="module" src="game.js"></script>
