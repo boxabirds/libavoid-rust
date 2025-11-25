@@ -355,11 +355,19 @@ impl IncSolver {
             }
         }
 
+        #[cfg(test)]
+        {
+            eprintln!("VPSC solve: {} variables, {} constraints", self.variables.len(), self.constraints.len());
+            for (i, c) in self.constraints.iter().enumerate() {
+                eprintln!("  constraint {}: var[{}] + {} <= var[{}]", i, c.left, c.gap, c.right);
+            }
+        }
+
         // Simple greedy constraint satisfaction
         // Process constraints in order until no more violations
         // C++ ref: libavoid/vpsc.cpp:284 - equality constraints are always processed
         let max_iterations = self.constraints.len() * 2 + 1;
-        for _ in 0..max_iterations {
+        for _iter in 0..max_iterations {
             let mut satisfied_any = false;
 
             for cid in 0..self.constraints.len() {
@@ -373,9 +381,21 @@ impl IncSolver {
                 // Process if: equality constraint OR violated (slack < 0)
                 // Equality constraints must always be activated to force alignment
                 if is_equality || slack < -1e-10 {
+                    #[cfg(test)]
+                    eprintln!("  iter {}: processing constraint {} (var[{}] + {} <= var[{}]), slack={}, equality={}",
+                        iter, cid, self.constraints[cid].left, self.constraints[cid].gap,
+                        self.constraints[cid].right, slack, is_equality);
                     // Constraint needs to be satisfied - merge blocks
                     if self.satisfy_constraint(cid) {
                         satisfied_any = true;
+                        #[cfg(test)]
+                        {
+                            eprintln!("    after merge:");
+                            for (i, var) in self.variables.iter().enumerate() {
+                                eprintln!("      var[{}]: pos={:.2}, offset={:.2}, block={:?}",
+                                    i, var.final_position, var.offset, var.block_id);
+                            }
+                        }
                     }
                 }
             }
@@ -387,26 +407,80 @@ impl IncSolver {
 
         // Update final positions
         self.update_final_positions();
+
+        #[cfg(test)]
+        {
+            eprintln!("VPSC final:");
+            for (i, var) in self.variables.iter().enumerate() {
+                eprintln!("  var[{}]: final_pos={:.2}", i, var.final_position);
+            }
+            // Check all constraints
+            for c in &self.constraints {
+                let left_pos = self.variables[c.left].final_position;
+                let right_pos = self.variables[c.right].final_position;
+                let slack = right_pos - left_pos - c.gap;
+                if slack < -1e-6 {
+                    eprintln!("  VIOLATED: var[{}] + {} <= var[{}] (slack={:.4})",
+                        c.left, c.gap, c.right, slack);
+                }
+            }
+        }
     }
 
-    /// Satisfy a violated constraint by merging blocks
-    /// Returns true if blocks were merged
+    /// Satisfy a violated constraint by merging blocks or adjusting offsets
+    /// Returns true if any change was made
     fn satisfy_constraint(&mut self, constraint_id: usize) -> bool {
         let constraint = &self.constraints[constraint_id];
         let left_var = constraint.left;
         let right_var = constraint.right;
+        let gap = constraint.gap;
 
         let left_block_id = self.variables[left_var].block_id;
         let right_block_id = self.variables[right_var].block_id;
 
         match (left_block_id, right_block_id) {
             (Some(lb), Some(rb)) if lb != rb && !self.blocks[lb].deleted && !self.blocks[rb].deleted => {
-                // Merge blocks
+                // Different blocks - merge them
                 self.merge_blocks(lb, rb, constraint_id);
                 true
             }
+            (Some(lb), Some(rb)) if lb == rb && !self.blocks[lb].deleted => {
+                // Same block - check if constraint is satisfied by offsets
+                let left_offset = self.variables[left_var].offset;
+                let right_offset = self.variables[right_var].offset;
+
+                // Constraint: left_pos + gap <= right_pos
+                // In terms of offsets: (block_pos + left_offset) + gap <= (block_pos + right_offset)
+                // Simplifies to: left_offset + gap <= right_offset
+
+                if left_offset + gap > right_offset + 1e-10 {
+                    // Constraint violated within block - adjust offsets
+                    // Need to increase right_offset to satisfy: right_offset >= left_offset + gap
+                    let required_right_offset = left_offset + gap;
+
+                    // Shift the right variable and all variables connected to it through
+                    // constraints that are "downstream" of right_var.
+                    // For simplicity, just shift right_var and recalculate.
+                    self.variables[right_var].offset = required_right_offset;
+
+                    // Recalculate block optimal position with new offsets
+                    self.blocks[lb].update_weighted_position(&self.variables);
+
+                    // Update final positions for all variables in block
+                    for &var_idx in &self.blocks[lb].variables.clone() {
+                        self.variables[var_idx].final_position =
+                            self.blocks[lb].position + self.variables[var_idx].offset;
+                    }
+
+                    self.constraints[constraint_id].active = true;
+                    true
+                } else {
+                    // Constraint already satisfied
+                    false
+                }
+            }
             _ => {
-                // Already in same block or invalid
+                // Invalid state
                 false
             }
         }

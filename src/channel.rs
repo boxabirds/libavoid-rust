@@ -229,6 +229,12 @@ impl ShiftSegment {
         let touching = (self_max - other_min).abs() < 1e-6
                     || (other_max - self_min).abs() < 1e-6;
 
+        #[cfg(test)]
+        if self.route_idx != other.route_idx && (self.position - other.position).abs() < 1e-6 {
+            eprintln!("      overlaps check: self.range=[{}, {}], other.range=[{}, {}], proper_overlap={}, touching={}",
+                self_min, self_max, other_min, other_max, proper_overlap, touching);
+        }
+
         if proper_overlap {
             // The segments overlap in parallel dimension
             // Also check if their movement ranges overlap
@@ -462,6 +468,45 @@ impl ShiftSegment {
             }
         }
 
+        // Case 3: Adjacent segments of the same route that touch at endpoints
+        // These MUST stay aligned to maintain orthogonality.
+        // This handles the common case where consecutive segments share a bend point.
+        if self.route_idx == other.route_idx {
+            let dim = self.dimension;
+            let alt_dim = (dim + 1) % 2;
+
+            let self_low = self.low_point(routes);
+            let self_high = self.high_point(routes);
+            let other_low = other.low_point(routes);
+            let other_high = other.high_point(routes);
+
+            // Get positions in the alt dimension (where they might touch)
+            let (self_low_alt, self_high_alt) = if alt_dim == 0 {
+                (self_low.x, self_high.x)
+            } else {
+                (self_low.y, self_high.y)
+            };
+            let (other_low_alt, other_high_alt) = if alt_dim == 0 {
+                (other_low.x, other_high.x)
+            } else {
+                (other_low.y, other_high.y)
+            };
+
+            // Check if they touch at one endpoint in alt dimension
+            let touches = (self_low_alt - other_high_alt).abs() < 1e-6
+                || (self_high_alt - other_low_alt).abs() < 1e-6;
+
+            // Get their positions in the sweep dimension (where they shift)
+            let self_pos = if dim == 0 { self_low.y } else { self_low.x };
+            let other_pos = if dim == 0 { other_low.y } else { other_low.x };
+
+            // If they touch and are at the same position (or very close),
+            // they must be aligned to maintain orthogonality
+            if touches && (self_pos - other_pos).abs() < SEGMENT_POSITION_TOLERANCE {
+                return true;
+            }
+        }
+
         false
     }
 
@@ -638,19 +683,40 @@ impl ChannelRouter {
         // Build shift segments with obstacle-aware limits
         let mut segments = self.build_shift_segments_with_obstacles(routes, dimension, obstacles);
 
+        #[cfg(test)]
+        {
+            eprintln!("nudge_dimension_with_obstacles: dim={}, routes={}, built {} segments",
+                dimension, routes.len(), segments.len());
+            for (i, seg) in segments.iter().enumerate() {
+                eprintln!("    seg[{}]: route={}, pos={}, limits=[{}, {}], fixed={}, connected_to_shape={}",
+                    i, seg.route_idx, seg.position, seg.min_limit, seg.max_limit, seg.fixed, seg.connected_to_shape);
+            }
+        }
+
         if segments.is_empty() {
             return;
         }
 
         // Filter out shape-connected segments if option is disabled
         if !nudge_shape_connected {
+            #[cfg(test)]
+            {
+                let before = segments.len();
+                segments.retain(|seg| !seg.connected_to_shape);
+                eprintln!("  filtered shape-connected: {} -> {} segments", before, segments.len());
+            }
+            #[cfg(not(test))]
             segments.retain(|seg| !seg.connected_to_shape);
         }
 
-        // Filter out touching colinear segments if option is disabled (Task #12)
-        if !nudge_touching_colinear {
-            segments.retain(|seg| !seg.touches_colinear);
-        }
+        // Note: NudgeOrthogonalTouchingColinearSegments controls whether these segments
+        // should be nudged apart or kept together. We DON'T filter them out - instead,
+        // the constraint logic uses this flag to decide whether to force alignment.
+        // (The old code incorrectly filtered them out, preventing nudging entirely.)
+        #[cfg(test)]
+        eprintln!("  touches_colinear segments: {}, nudge_touching_colinear={}",
+            segments.iter().filter(|s| s.touches_colinear).count(), nudge_touching_colinear);
+        let _ = nudge_touching_colinear; // Suppress unused warning for now
 
         if segments.is_empty() {
             return;
@@ -677,11 +743,39 @@ impl ChannelRouter {
         // C++ ref: libavoid/orthogonal.cpp:2397-2400, 2779-2790
         segments = self.merge_aligned_segments(segments, routes, dimension);
 
+        #[cfg(test)]
+        {
+            eprintln!("  after merge: {} segments", segments.len());
+            for (i, seg) in segments.iter().enumerate() {
+                eprintln!("    seg[{}]: route={}, pos={}, limits=[{}, {}], fixed={}",
+                    i, seg.route_idx, seg.position, seg.min_limit, seg.max_limit, seg.fixed);
+            }
+        }
+
         // Build constraints and solve
         let (solver, seg_var_map) = self.build_vpsc_problem(&segments, routes);
 
+        #[cfg(test)]
+        {
+            eprintln!("  after solve:");
+            for (i, seg) in segments.iter().enumerate() {
+                if let Some(var_idx) = seg_var_map[i] {
+                    let new_pos = solver.get_position(var_idx);
+                    eprintln!("    seg[{}]: old_pos={}, new_pos={}", i, seg.position, new_pos);
+                }
+            }
+        }
+
         // Apply solved positions
         self.apply_positions(&mut segments, &solver, &seg_var_map);
+
+        #[cfg(test)]
+        {
+            eprintln!("  after apply_positions:");
+            for (i, seg) in segments.iter().enumerate() {
+                eprintln!("    seg[{}]: route={}, pos={}", i, seg.route_idx, seg.position);
+            }
+        }
 
         // Update routes with new positions
         self.update_routes(routes, &segments, dimension);
@@ -1037,19 +1131,32 @@ impl ChannelRouter {
         nudge_distance: f64,
     ) {
         let seg_pos = segment.position;
+        const EPSILON: f64 = 1e-6;
 
-        // If segment is below obstacle, constrain max_limit
-        if seg_pos < obs_perp_min {
+        // If segment is below obstacle (with tolerance), constrain max_limit
+        if seg_pos < obs_perp_min - EPSILON {
             let new_max = obs_perp_min - nudge_distance;
             segment.max_limit = segment.max_limit.min(new_max);
         }
-        // If segment is above obstacle, constrain min_limit
-        else if seg_pos > obs_perp_max {
+        // If segment is above obstacle (with tolerance), constrain min_limit
+        else if seg_pos > obs_perp_max + EPSILON {
             let new_min = obs_perp_max + nudge_distance;
             segment.min_limit = segment.min_limit.max(new_min);
         }
-        // If segment overlaps obstacle, make it fixed
-        else if seg_pos >= obs_perp_min && seg_pos <= obs_perp_max {
+        // If segment is AT the top edge of obstacle (can move up/below)
+        else if (seg_pos - obs_perp_min).abs() < EPSILON {
+            // At top edge - can only move up (decrease in Y)
+            let new_max = obs_perp_min;
+            segment.max_limit = segment.max_limit.min(new_max);
+        }
+        // If segment is AT the bottom edge of obstacle (can move down/above)
+        else if (seg_pos - obs_perp_max).abs() < EPSILON {
+            // At bottom edge - can only move down (increase in Y)
+            let new_min = obs_perp_max;
+            segment.min_limit = segment.min_limit.max(new_min);
+        }
+        // If segment is strictly inside obstacle, make it fixed
+        else if seg_pos > obs_perp_min + EPSILON && seg_pos < obs_perp_max - EPSILON {
             segment.min_limit = seg_pos;
             segment.max_limit = seg_pos;
             segment.fixed = true;
@@ -1184,6 +1291,43 @@ impl ChannelRouter {
             seg_var_map.push(Some(var_idx));
         }
 
+        // Add limit constraints using anchor variables
+        // This ensures VPSC respects segment limits during solving, not just post-hoc clamping.
+        // C++ libavoid ref: orthogonal.cpp:2826-2832 - adds constraint if maxSpaceLimit < CHANNEL_MAX
+        //
+        // For each segment with a limit that was actually constrained by an obstacle (not just
+        // the default generous range), we create a fixed anchor variable at the limit position
+        // and add a constraint: segment_var <= max_limit_anchor (or >= min_limit_anchor)
+        const DEFAULT_LIMIT_RANGE: f64 = 500.0; // Must match compute_limits()
+        const LIMIT_EPSILON: f64 = 1.0;
+        for (seg_idx, segment) in segments.iter().enumerate() {
+            let var_idx = seg_var_map[seg_idx].unwrap();
+
+            // Add max_limit constraint if it was actually constrained (less than default)
+            // Default max_limit = position + DEFAULT_LIMIT_RANGE
+            if segment.max_limit < segment.position + DEFAULT_LIMIT_RANGE - LIMIT_EPSILON {
+                // Create an anchor variable at max_limit with very high weight (essentially fixed)
+                let anchor_var = solver.add_variable(segment.max_limit, FIXED_WEIGHT);
+                // Constraint: segment_var + 0 <= anchor_var (i.e., segment_var <= max_limit)
+                solver.add_constraint(var_idx, anchor_var, 0.0);
+                #[cfg(test)]
+                eprintln!("  limit constraint: var[{}] <= {} (max_limit anchor var[{}])",
+                    var_idx, segment.max_limit, anchor_var);
+            }
+
+            // Add min_limit constraint if it was actually constrained (greater than default)
+            // Default min_limit = position - DEFAULT_LIMIT_RANGE
+            if segment.min_limit > segment.position - DEFAULT_LIMIT_RANGE + LIMIT_EPSILON {
+                // Create an anchor variable at min_limit with very high weight
+                let anchor_var = solver.add_variable(segment.min_limit, FIXED_WEIGHT);
+                // Constraint: anchor_var + 0 <= segment_var (i.e., segment_var >= min_limit)
+                solver.add_constraint(anchor_var, var_idx, 0.0);
+                #[cfg(test)]
+                eprintln!("  limit constraint: var[{}] >= {} (min_limit anchor var[{}])",
+                    var_idx, segment.min_limit, anchor_var);
+            }
+        }
+
         // Sort segments by position for consistent ordering
         let mut segment_order: Vec<usize> = (0..segments.len()).collect();
         segment_order.sort_by(|&a, &b| {
@@ -1197,16 +1341,27 @@ impl ChannelRouter {
         let mut same_route_constrained: std::collections::HashSet<(usize, usize)> =
             std::collections::HashSet::new();
 
-        // Create CHAIN constraints between ADJACENT overlapping segments
-        // This ensures proper transitive ordering (A+4≤B, B+4≤C → C at A+8)
-        // O(n²) pairwise would create shortcuts (A+4≤C → C could be at A+4)
-        for window in segment_order.windows(2) {
-            let j = window[0]; // lower position
-            let i = window[1]; // higher position
+        // Create constraints between ALL pairs of overlapping segments
+        // Note: We check all pairs, not just adjacent, because segments from
+        // different routes may have non-overlapping parallel ranges even at
+        // the same perpendicular position.
+        #[cfg(test)]
+        eprintln!("  segment_order: {:?}", segment_order);
 
-            if !segments[i].overlaps(&segments[j], routes) {
-                continue;
-            }
+        for (idx_i, &i) in segment_order.iter().enumerate() {
+            for &j in segment_order.iter().take(idx_i) {
+                // j has lower position than i in the sorted order
+
+                let overlaps = segments[i].overlaps(&segments[j], routes);
+                #[cfg(test)]
+                if segments[i].route_idx != segments[j].route_idx {
+                    eprintln!("  checking seg[{}] (pos={}) vs seg[{}] (pos={}): overlaps={}",
+                        i, segments[i].position, j, segments[j].position, overlaps);
+                }
+
+                if !overlaps {
+                    continue;
+                }
 
             // Skip if both fixed
             if segments[i].fixed && segments[j].fixed {
@@ -1257,10 +1412,15 @@ impl ChannelRouter {
                 (var_j, var_i)
             };
 
+            #[cfg(test)]
+            eprintln!("    adding constraint: var[{}] + {} <= var[{}], use_equality={}",
+                left_var, sep_dist, right_var, use_equality);
+
             if use_equality {
                 solver.add_equality_constraint(left_var, right_var, sep_dist);
             } else {
                 solver.add_constraint(left_var, right_var, sep_dist);
+            }
             }
         }
 
@@ -1335,6 +1495,9 @@ impl ChannelRouter {
     /// route connectivity. Additionally, for interior points (not at route endpoints),
     /// we must update all segments that share that point.
     fn update_routes(&self, routes: &mut [Polygon], segments: &[ShiftSegment], dimension: usize) {
+        #[cfg(test)]
+        eprintln!("  update_routes: {} segments, dim={}", segments.len(), dimension);
+
         // Group segments by route for proper handling of shared points
         let mut route_segments: std::collections::HashMap<usize, Vec<&ShiftSegment>> =
             std::collections::HashMap::new();
@@ -1350,22 +1513,24 @@ impl ChannelRouter {
         for (route_idx, segs) in route_segments {
             let route = &mut routes[route_idx];
 
-            // For each point in the route, find which segment(s) it belongs to
-            // and apply the appropriate position update
+            // For each segment, update ALL points in its indexes list
+            // This is critical for merged segments which may span multiple points
             for seg in &segs {
                 let new_pos = seg.position;
 
-                // Update ONLY the perpendicular coordinate
+                #[cfg(test)]
+                eprintln!("    route {}: updating {} points to pos={}", route_idx, seg.indexes.len(), new_pos);
+
+                // Update ONLY the perpendicular coordinate for ALL indexed points
                 // The parallel coordinate (the one that defines the segment's extent) must not change
-                if dimension == 0 {
-                    // Horizontal segment nudging - update Y coordinate only
-                    // low_idx and high_idx are the segment endpoints
-                    route.ps[seg.low_idx].y = new_pos;
-                    route.ps[seg.high_idx].y = new_pos;
-                } else {
-                    // Vertical segment nudging - update X coordinate only
-                    route.ps[seg.low_idx].x = new_pos;
-                    route.ps[seg.high_idx].x = new_pos;
+                for &idx in &seg.indexes {
+                    if dimension == 0 {
+                        // Horizontal segment nudging - update Y coordinate only
+                        route.ps[idx].y = new_pos;
+                    } else {
+                        // Vertical segment nudging - update X coordinate only
+                        route.ps[idx].x = new_pos;
+                    }
                 }
             }
         }

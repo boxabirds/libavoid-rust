@@ -986,7 +986,19 @@ impl Router {
             .collect();
 
         #[cfg(test)]
-        eprintln!("nudge_orthogonal_routes: extracted {} routes", routes.len());
+        {
+            eprintln!("nudge_orthogonal_routes: extracted {} routes", routes.len());
+            eprintln!("  route order (by conn_id): {:?}", orthogonal_conn_ids);
+            for (i, route) in routes.iter().enumerate() {
+                // Collect unique Y values from route points
+                let ys: std::collections::HashSet<i32> = (0..route.size())
+                    .map(|j| route.at(j).y as i32)
+                    .collect();
+                let mut y_list: Vec<i32> = ys.into_iter().collect();
+                y_list.sort();
+                eprintln!("  routes[{}] (conn {}) Y values: {:?}", i, orthogonal_conn_ids[i], y_list);
+            }
+        }
 
         if routes.is_empty() {
             return;
@@ -1614,9 +1626,11 @@ mod tests {
     fn test_webdemo_example10_nudging_integration() {
         let mut router = Router::new(ROUTER_FLAG_NONE);
         router.set_routing_option(RoutingOption::NudgeOrthogonalRoutes, true);
+        router.set_routing_parameter(RoutingParameter::IdealNudgingDistance, 10.0);
         router.set_transaction_use(true);
 
-        // Create obstacle at (150, 80) with size (100, 90) = x:[150,250], y:[80,170]
+        // Create obstacle in the middle that forces routes to go around
+        // Obstacle at x:[150,250], y:[80,170]
         let mut obstacle_poly = Polygon::new();
         obstacle_poly.push(Point::new(150.0, 80.0));
         obstacle_poly.push(Point::new(250.0, 80.0));
@@ -1624,29 +1638,30 @@ mod tests {
         obstacle_poly.push(Point::new(150.0, 170.0));
         router.add_shape(obstacle_poly, 1);
 
-        // Create 4 connectors like the webdemo - with ORTHOGONAL routing type
-        // Route 1: y=50 (above obstacle, should go straight)
+        // Create 4 connectors that ALL start and end at y=125 (through obstacle center)
+        // This forces them to route around and share the same horizontal segments at y=80 or y=170
+        // Route 1
         let conn1_id = router.new_connector(
-            ConnEnd::new(Point::new(30.0, 50.0)),
-            ConnEnd::new(Point::new(370.0, 50.0))
+            ConnEnd::new(Point::new(30.0, 125.0)),
+            ConnEnd::new(Point::new(370.0, 125.0))
         );
         router.get_connector_mut(conn1_id).unwrap().set_routing_type(ConnType::Orthogonal);
 
-        // Route 2: y=70 (above obstacle, should go straight)
+        // Route 2 - same as Route 1
         let conn2_id = router.new_connector(
-            ConnEnd::new(Point::new(30.0, 70.0)),
-            ConnEnd::new(Point::new(370.0, 70.0))
+            ConnEnd::new(Point::new(30.0, 125.0)),
+            ConnEnd::new(Point::new(370.0, 125.0))
         );
         router.get_connector_mut(conn2_id).unwrap().set_routing_type(ConnType::Orthogonal);
 
-        // Route 3: y=90 (intersects obstacle, must go around)
+        // Route 3 - same as Route 1
         let conn3_id = router.new_connector(
-            ConnEnd::new(Point::new(30.0, 90.0)),
-            ConnEnd::new(Point::new(370.0, 90.0))
+            ConnEnd::new(Point::new(30.0, 125.0)),
+            ConnEnd::new(Point::new(370.0, 125.0))
         );
         router.get_connector_mut(conn3_id).unwrap().set_routing_type(ConnType::Orthogonal);
 
-        // Route 4: y=200 (below obstacle, should go straight)
+        // Route 4 - different Y, not overlapping
         let conn4_id = router.new_connector(
             ConnEnd::new(Point::new(30.0, 200.0)),
             ConnEnd::new(Point::new(370.0, 200.0))
