@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zombie Chase - libavoid-rust Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+      color: #e94560;
+    }
+
+    .instructions {
+      margin-bottom: 15px;
+      text-align: center;
+      color: #aaa;
+      font-size: 14px;
+    }
+
+    .instructions kbd {
+      background: #333;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      margin: 0 2px;
+    }
+
+    #game-container {
+      position: relative;
+      background: #16213e;
+      border: 3px solid #e94560;
+      border-radius: 8px;
+    }
+
+    #game-canvas {
+      display: block;
+    }
+
+    #hud {
+      display: flex;
+      gap: 30px;
+      margin-top: 15px;
+      font-size: 18px;
+    }
+
+    #hud .stat {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #hud .label {
+      color: #888;
+    }
+
+    #hud .value {
+      font-weight: bold;
+      font-size: 24px;
+    }
+
+    #timer .value {
+      color: #4ecca3;
+    }
+
+    #distance .value {
+      color: #ffd369;
+    }
+
+    #game-over {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.9);
+      padding: 40px 60px;
+      border-radius: 12px;
+      text-align: center;
+      display: none;
+    }
+
+    #game-over h2 {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+
+    #game-over.win h2 {
+      color: #4ecca3;
+    }
+
+    #game-over.lose h2 {
+      color: #e94560;
+    }
+
+    #game-over p {
+      font-size: 18px;
+      margin-bottom: 20px;
+      color: #aaa;
+    }
+
+    button {
+      background: #e94560;
+      color: white;
+      border: none;
+      padding: 12px 30px;
+      font-size: 18px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #ff6b6b;
+    }
+
+    #loading {
+      font-size: 24px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <h1>Zombie Chase</h1>
+  <div class="instructions">
+    Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> keys. Survive for 30 seconds!
+  </div>
+
+  <div id="loading">Loading WASM module...</div>
+
+  <div id="game-container" style="display: none;">
+    <svg id="game-canvas" width="800" height="600"></svg>
+    <div id="game-over">
+      <h2 id="result-text"></h2>
+      <p id="result-message"></p>
+      <button onclick="game.restart()">Play Again</button>
+    </div>
+  </div>
+
+  <div id="hud" style="display: none;">
+    <div class="stat" id="timer">
+      <span class="label">Time Left:</span>
+      <span class="value" id="time-value">30.0</span>
+    </div>
+    <div class="stat" id="distance">
+      <span class="label">Distance:</span>
+      <span class="value" id="distance-value">0</span>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>

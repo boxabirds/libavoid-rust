@@ -1118,11 +1118,18 @@ window.examples.interactive = {
   },
 
   reset: function() {
-    this.router = new Router(POLY_LINE_ROUTING);
+    // Create fresh router with same settings as init()
+    this.router = new Router(ORTHOGONAL_ROUTING);
+    this.router.setTransactionUse(true);
+    this.router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
+    this.router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, window.globalNudgeDistance);
+    this.router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
+
     this.shapes = [];
     this.connectors = [];
     this.pendingConnector = null;
     this.nextShapeId = 1;
+    this.nextColorIndex = 0;
 
     clearSvg('canvas-interactive');
     this.setMode('shape');
