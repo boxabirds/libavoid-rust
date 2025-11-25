@@ -1,6 +1,6 @@
 # libavoid-rust
 
-A Rust port of **libavoid** - Fast, object-avoiding connector routing for interactive diagram editors.
+A Rust port of **libavoid** - Fast, object-avoiding connector routing for interactive diagram editors. Includes WebAssembly bindings for JavaScript/TypeScript.
 
 ## Overview
 
@@ -8,207 +8,268 @@ libavoid is a cross-platform library providing fast, object-avoiding connector r
 
 ### Features
 
-- 🚀 **Fast incremental routing** - Efficient updates when shapes move
-- 📐 **Multiple routing modes**:
-  - Polyline routing (direct paths)
+- **Fast incremental routing** - Efficient updates when shapes move
+- **Multiple routing modes**:
+  - Polyline routing (direct diagonal paths)
   - Orthogonal routing (rectilinear/Manhattan routing)
-- 🎯 **Object avoidance** - Automatically routes around obstacles
-- 🔄 **Transaction support** - Batch multiple operations for performance
-- 📍 **Connection pins** - Attach connectors to specific points on shapes
-- ⚙️ **Configurable parameters** - Fine-tune routing behavior
+- **Object avoidance** - Automatically routes around obstacles
+- **Transaction support** - Batch multiple operations for performance
+- **Connection pins** - Attach connectors to specific points on shapes
+- **Configurable parameters** - Shape buffer distance, nudging, penalties
+- **WebAssembly support** - Use in browsers and Node.js
 
 ## Installation
 
-Add this to your `Cargo.toml`:
+### Rust
+
+Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 libavoid = "0.1.0"
 ```
 
+### JavaScript/TypeScript (WASM)
+
+Build the WASM module:
+
+```bash
+# Install wasm-pack if you haven't already
+cargo install wasm-pack
+
+# Build for web
+wasm-pack build --target web --features wasm
+
+# Or build for Node.js
+wasm-pack build --target nodejs --features wasm
+```
+
 ## Quick Start
 
+### Rust Usage
+
 ```rust
-use libavoid::{Router, Point, Rectangle, ConnEnd, ConnType};
+use libavoid::{Router, Point, Rectangle, ConnRef, ConnEnd, ConnType, PolygonInterface};
 
-// Create a router
-let mut router = Router::new(0);
+fn main() {
+    // Create a router with orthogonal routing
+    let mut router = Router::new(ConnType::Orthogonal as u32);
+    router.set_transaction_use(true);
 
-// Add a shape (obstacle)
-let rect = Rectangle::new(Point::new(100.0, 100.0), 80.0, 60.0);
-let shape_id = router.add_shape(rect.into(), 1);
+    // Add an obstacle
+    let obstacle = Rectangle::new(Point::new(100.0, 100.0), 80.0, 60.0);
+    router.add_shape(obstacle.into(), 1);
 
-// Create a connector
-let src = ConnEnd::new(Point::new(0.0, 0.0));
-let dst = ConnEnd::new(Point::new(200.0, 200.0));
-let conn_id = router.new_connector(src, dst);
+    // Create a connector
+    let src = ConnEnd::new(Point::new(50.0, 100.0));
+    let dst = ConnEnd::new(Point::new(200.0, 100.0));
+    let mut conn = ConnRef::with_endpoints(1, src, dst);
+    conn.set_routing_type(ConnType::Orthogonal);
+    router.add_connector(conn);
 
-// The connector is automatically routed around the shape!
+    // Process routing
+    router.process_transaction();
 
-// Get the routed path
-if let Some(conn) = router.get_connector(conn_id) {
-    if let Some(route) = conn.display_route() {
-        for point in route.points() {
-            println!("Point: ({}, {})", point.x, point.y);
+    // Get the route
+    if let Some(conn) = router.get_connector(1) {
+        if let Some(route) = conn.display_route() {
+            for i in 0..route.size() {
+                let pt = route.at(i);
+                println!("Point: ({}, {})", pt.x, pt.y);
+            }
         }
     }
 }
 ```
 
-## Examples
+### JavaScript Usage (Browser)
 
-### Basic Routing
+```javascript
+import init, { Router, Point, Rectangle, ConnRef, ConnEnd, ShapeRef } from './pkg/libavoid.js';
 
-```rust
-use libavoid::{Router, Point, Rectangle, ConnEnd};
+const ORTHOGONAL_ROUTING = 2;
 
-let mut router = Router::new(0);
+async function main() {
+  await init();
 
-// Add obstacles
-let rect1 = Rectangle::new(Point::new(50.0, 50.0), 80.0, 60.0);
-router.add_shape(rect1.into(), 1);
+  // Create router
+  const router = new Router(ORTHOGONAL_ROUTING);
 
-// Create connector
-let src = ConnEnd::new(Point::new(0.0, 0.0));
-let dst = ConnEnd::new(Point::new(150.0, 150.0));
-router.new_connector(src, dst);
-```
+  // Add obstacle
+  const rect = new Rectangle(new Point(100, 100), 80, 60);
+  const shape = new ShapeRef(router, rect.toPolygon());
+  router.addShape(shape);
 
-### Orthogonal Routing
+  // Create connector
+  const srcEnd = new ConnEnd(new Point(50, 100));
+  const dstEnd = new ConnEnd(new Point(200, 100));
+  const conn = ConnRef.createWithEndpoints(router, srcEnd, dstEnd);
+  conn.setRoutingType(ORTHOGONAL_ROUTING);
+  router.addConnector(conn);
 
-```rust
-use libavoid::{Router, Point, ConnEnd, ConnType};
+  // Process and get route
+  router.processTransaction();
+  const route = router.getConnectorRoute(conn.id());
 
-let mut router = Router::new(0);
-
-let src = ConnEnd::new(Point::new(0.0, 100.0));
-let dst = ConnEnd::new(Point::new(200.0, 100.0));
-let conn_id = router.new_connector(src, dst);
-
-// Set to orthogonal (rectilinear) routing
-if let Some(conn) = router.get_connector_mut(conn_id) {
-    conn.set_routing_type(ConnType::Orthogonal);
+  for (let i = 0; i < route.size(); i++) {
+    const pt = route.at(i);
+    console.log(`Point: (${pt.x}, ${pt.y})`);
+  }
 }
 ```
 
-### Using Transactions
+## Examples
 
-For better performance when making multiple changes:
-
-```rust
-use libavoid::{Router, ROUTER_FLAG_USE_TRANSACTIONS};
-
-let mut router = Router::new(ROUTER_FLAG_USE_TRANSACTIONS);
-
-// Make multiple changes
-router.add_shape(shape1.into(), 1);
-router.add_shape(shape2.into(), 2);
-router.new_connector(src1, dst1);
-router.new_connector(src2, dst2);
-
-// Process all changes at once
-router.process_transaction();
-```
-
-### Moving Shapes
-
-```rust
-// Move a shape to a new position
-router.move_shape(shape_id, Point::new(150.0, 200.0));
-
-// Connectors are automatically rerouted
-```
-
-### Routing Parameters
-
-Customize routing behavior:
-
-```rust
-use libavoid::{Router, RoutingParameter};
-
-let mut router = Router::new(0);
-
-// Increase penalty for bends (prefer straighter routes)
-router.set_routing_parameter(RoutingParameter::BendPenalty, 100.0);
-
-// Adjust shape buffer distance
-router.set_routing_parameter(RoutingParameter::ShapeBufferDistance, 10.0);
-```
-
-### Debug Visualization
-
-Export to SVG for debugging:
-
-```rust
-router.output_instance_to_svg("output.svg")?;
-```
-
-## Running Examples
-
-Run the included example:
+### Running Examples
 
 ```bash
+# Rust example
 cargo run --example simple_routing
+
+# Web examples (start server from examples directory)
+cd examples
+python3 -m http.server 8080
+# Then open http://localhost:8080/web/gallery.html
 ```
 
-This creates a `routing_example.svg` file showing the routed connectors.
+### Available Examples
 
-## Core Concepts
+| Example | Description | Location |
+|---------|-------------|----------|
+| **Simple Routing** | Basic Rust connector routing | `examples/simple_routing.rs` |
+| **Web Gallery** | Interactive demo of all routing features | `examples/web/gallery.html` |
+| **Zombie Chase** | Game demo using pathfinding | `examples/zombies/index.html` |
+| **Node.js** | Server-side routing example | `examples/node/main.mjs` |
 
-### Router
+### Web Gallery Features
 
-The `Router` is the main entry point. It manages all shapes and connectors and performs routing calculations.
+The web gallery (`examples/web/gallery.html`) demonstrates:
 
-### Shapes
+1. **Basic Polyline Routing** - Direct paths around obstacles
+2. **Orthogonal Routing** - Manhattan-style H/V only paths
+3. **Multiple Obstacles** - Routing through complex layouts
+4. **Shape Operations** - Add, move, delete shapes dynamically
+5. **Transaction Batching** - Performance comparison
+6. **Multiple Connectors** - Many simultaneous routes
+7. **Crossing Detection** - Visualize route intersections
+8. **Interactive Demo** - Click to add shapes and connectors
+9. **Route Nudging** - Automatic separation of overlapping routes
+10. **Options Comparison** - Side-by-side parameter effects
 
-Shapes are obstacles that connectors must route around. They are defined by polygons.
+### Zombie Chase Game
 
-### Connectors
+A playable game demonstrating real-time pathfinding:
 
-Connectors (also called "connections" or "edges") are the lines that connect two endpoints and are automatically routed around shapes.
+- Zombies chase the player using libavoid routing
+- Multiple rounds with increasing difficulty
+- Shows polyline routing for direct pursuit paths
+- Toggle debug view to see connector paths
 
-### Connection Endpoints
+## Routing Parameters
 
-Each connector has a source and destination endpoint. Endpoints can be:
-- Free points in space
-- Attached to shapes
-- Attached to specific connection pins on shapes
+Configure routing behavior:
 
-### Routing Types
+```rust
+use libavoid::RoutingParameter;
 
-- **PolyLine**: Direct paths with arbitrary angles
-- **Orthogonal**: Only horizontal and vertical segments (Manhattan routing)
+// Distance to keep between routes and obstacles
+router.set_routing_parameter(RoutingParameter::ShapeBufferDistance, 10.0);
+
+// Distance between parallel route segments (nudging)
+router.set_routing_parameter(RoutingParameter::IdealNudgingDistance, 10.0);
+
+// Penalty for route segments (affects path complexity)
+router.set_routing_parameter(RoutingParameter::SegmentPenalty, 10.0);
+
+// Penalty for route crossings
+router.set_routing_parameter(RoutingParameter::CrossingPenalty, 200.0);
+```
+
+## Routing Options
+
+Enable/disable routing features:
+
+```rust
+use libavoid::RoutingOption;
+
+// Enable nudging (separates overlapping orthogonal routes)
+router.set_routing_option(RoutingOption::NudgeOrthogonalRoutes, true);
+
+// Penalize shared path segments
+router.set_routing_option(RoutingOption::PenaliseOrthogonalSharedPaths, true);
+```
+
+## Testing
+
+```bash
+# Run Rust tests
+cargo test
+
+# Run JavaScript tests
+cd js-tests
+npm install
+npm run build:wasm  # Build WASM for tests
+npm test
+```
+
+The JS test suite includes:
+- Unit tests for individual classes
+- API compatibility tests with libavoid-js
+- Behavioral parity tests
+- Integration tests
+
+## Building
+
+### Rust Library
+
+```bash
+cargo build --release
+```
+
+### WASM Module
+
+```bash
+# For web (ES modules)
+wasm-pack build --target web --features wasm
+
+# For Node.js
+wasm-pack build --target nodejs --features wasm
+
+# For bundlers (webpack, etc.)
+wasm-pack build --target bundler --features wasm
+```
+
+### Running Benchmarks
+
+```bash
+cargo bench
+```
 
 ## Architecture
 
-The library is organized into several modules:
+The library is organized into modules:
 
-- `geometry` - Core geometric types (Point, Polygon, Rectangle, etc.)
-- `router` - Main routing engine and API
-- `connector` - Connector definitions and routing
-- `obstacle` - Obstacle/shape representation
-- `shape` - Shape-specific functionality
-- `visibility` - Visibility graph computation
-- `graph` - Pathfinding algorithms (A*)
-- `orthogonal` - Orthogonal routing algorithms
+| Module | Description |
+|--------|-------------|
+| `geometry` | Core types: Point, Polygon, Rectangle, Box |
+| `router` | Main routing engine and API |
+| `connector` | Connector definitions and routing |
+| `shape` | Shape/obstacle representation |
+| `visibility` | Visibility graph computation |
+| `orthogonal` | Orthogonal routing with visibility graphs |
+| `vpsc` | Variable Placement with Separation Constraints (nudging) |
+| `wasm` | WebAssembly bindings |
 
-## Differences from C++ libavoid
+## Routing Algorithms
 
-This Rust port maintains the core algorithms and API design of the original library while adapting to Rust idioms:
+### Polyline Routing
+Uses visibility graphs to find shortest paths that avoid obstacles. Paths can have any angle.
 
-- Uses Rust's ownership system instead of manual memory management
-- Uses `Option` and `Result` instead of null pointers
-- Uses trait objects for polymorphism
-- Simplified some internal implementations while maintaining API compatibility
-
-## Performance
-
-The library is designed for interactive applications:
-
-- Incremental updates when shapes move
-- Visibility graph caching
-- Transaction support for batch operations
-- Efficient pathfinding with A* algorithm
+### Orthogonal Routing
+Generates rectilinear (horizontal/vertical only) paths using:
+1. Orthogonal visibility graph generation
+2. A* pathfinding on the visibility graph
+3. VPSC-based nudging to separate overlapping segments
 
 ## Original C++ Library
 
@@ -223,41 +284,35 @@ This is a port of the original libavoid C++ library:
 
 LGPL-2.1 (same as the original library)
 
+## Status
+
+Core functionality implemented:
+
+- [x] Basic geometry types
+- [x] Router core
+- [x] Polyline routing
+- [x] Orthogonal routing
+- [x] Visibility graph
+- [x] A* pathfinding
+- [x] Shape management
+- [x] Connector management
+- [x] Transaction support
+- [x] Connection pins (basic)
+- [x] Route nudging (VPSC)
+- [x] WebAssembly bindings
+- [ ] Hyperedge routing
+- [ ] Junction support
+- [ ] Cluster support
+
 ## Contributing
 
-Contributions are welcome! This is a port in progress and there are many opportunities to:
-
-- Improve routing algorithms
-- Add missing features from the C++ version
-- Optimize performance
-- Add more examples and documentation
-- Write more comprehensive tests
+Contributions welcome! Areas of interest:
+- Performance optimizations
+- Missing features from C++ version
+- Additional examples and documentation
+- Test coverage improvements
 
 ## Acknowledgments
 
 - Michael Wybrow for the original C++ libavoid library
 - Monash University's Adaptive Diagrams and Documents lab
-
-## Status
-
-This is an initial port implementing the core functionality:
-
-- ✅ Basic geometry types
-- ✅ Router core
-- ✅ Polyline routing
-- ✅ Orthogonal routing
-- ✅ Visibility graph
-- ✅ A* pathfinding
-- ✅ Shape management
-- ✅ Connector management
-- ✅ Transaction support
-- ⚠️ Connection pins (basic support)
-- ❌ Hyperedge routing
-- ❌ Junction support
-- ❌ Advanced orthogonal improvements
-- ❌ Cluster support
-
-## Resources
-
-- [Original libavoid documentation](http://www.adaptagrams.org/documentation/libavoid.html)
-- [Example gallery](examples/)
