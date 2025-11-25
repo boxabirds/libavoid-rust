@@ -136,6 +136,24 @@
   <h1>libavoid-rust Examples Gallery</h1>
   <p class="subtitle">MECE demonstration of connector routing capabilities</p>
 
+  <div class="global-controls" style="max-width: 1400px; margin: 0 auto 20px auto; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+    <label style="font-weight: 600; color: #333;">Nudge Distance:</label>
+    <input type="number" id="global-nudge-input" value="10" min="0" max="50" step="1"
+           style="width: 70px; padding: 8px 12px; border: 2px solid #e5e7eb; border-radius: 4px; font-size: 1em;">
+    <span style="color: #666; font-size: 0.9em;">px</span>
+
+    <label style="font-weight: 600; color: #333; margin-left: 20px;">Shape Buffer:</label>
+    <input type="number" id="global-buffer-input" value="4" min="0" max="50" step="1"
+           style="width: 70px; padding: 8px 12px; border: 2px solid #e5e7eb; border-radius: 4px; font-size: 1em;">
+    <span style="color: #666; font-size: 0.9em;">px</span>
+
+    <button id="apply-nudge-btn"
+            style="padding: 8px 16px; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; font-size: 0.9em;">
+      Apply to All
+    </button>
+    <span id="nudge-status" style="color: #666; font-size: 0.85em; margin-left: auto;"></span>
+  </div>
+
   <div id="loading" class="loading">Loading WASM module...</div>
 
   <div id="gallery" class="gallery" style="display: none;">
@@ -339,19 +357,19 @@
             </div>
           </div>
           <div class="comparison-cell">
-            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 4px</div>
+            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 5px</div>
             <div class="canvas-container" style="margin-bottom: 0;">
               <svg id="canvas-compare-2" viewBox="0 0 200 150"></svg>
             </div>
           </div>
           <div class="comparison-cell">
-            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 8px</div>
+            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 10px</div>
             <div class="canvas-container" style="margin-bottom: 0;">
               <svg id="canvas-compare-3" viewBox="0 0 200 150"></svg>
             </div>
           </div>
           <div class="comparison-cell">
-            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 16px</div>
+            <div class="comparison-label" style="font-size: 0.8em; font-weight: 600; margin-bottom: 5px; text-align: center;">Nudge = 20px</div>
             <div class="canvas-container" style="margin-bottom: 0;">
               <svg id="canvas-compare-4" viewBox="0 0 200 150"></svg>
             </div>

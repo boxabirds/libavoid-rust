@@ -728,10 +728,23 @@ impl OrthogonalVisGraphGenerator {
 
     /// Generate the static orthogonal visibility graph.
     /// C++ ref: generateStaticOrthogonalVisGraph() - orthogonal.cpp:1730-1981
+    ///
+    /// `shape_buffer_distance` expands obstacle bounds by this amount, creating
+    /// a buffer zone that routes cannot enter.
     pub fn generate(
         &mut self,
         obstacles: &[ObstacleInput],
         connectors: &[ConnectorInput],
+    ) -> VisibilityGraph {
+        self.generate_with_buffer(obstacles, connectors, 0.0)
+    }
+
+    /// Generate visibility graph with a buffer distance around obstacles.
+    pub fn generate_with_buffer(
+        &mut self,
+        obstacles: &[ObstacleInput],
+        connectors: &[ConnectorInput],
+        shape_buffer_distance: f64,
     ) -> VisibilityGraph {
         let mut graph = VisibilityGraph::new();
 
@@ -758,7 +771,7 @@ impl OrthogonalVisGraphGenerator {
         // ====================================================================
 
         // Create events for vertical sweep
-        let (mut events, mut nodes) = self.create_vertical_events(obstacles, connectors);
+        let (mut events, mut nodes) = self.create_vertical_events(obstacles, connectors, shape_buffer_distance);
         events.sort();
 
         // Fix visibility on graph boundary
@@ -776,7 +789,7 @@ impl OrthogonalVisGraphGenerator {
         // ====================================================================
 
         // Create events for horizontal sweep
-        let (mut h_events, mut h_nodes) = self.create_horizontal_events(obstacles, connectors);
+        let (mut h_events, mut h_nodes) = self.create_horizontal_events(obstacles, connectors, shape_buffer_distance);
         h_events.sort();
 
         // Fix visibility on graph boundary
@@ -806,6 +819,7 @@ impl OrthogonalVisGraphGenerator {
         &mut self,
         obstacles: &[ObstacleInput],
         connectors: &[ConnectorInput],
+        buffer: f64,
     ) -> (Vec<Event>, Vec<ScanlineNode>) {
         let mut events = Vec::new();
         let mut nodes = Vec::new();
@@ -813,6 +827,11 @@ impl OrthogonalVisGraphGenerator {
         // Create obstacle events
         for obs in obstacles {
             let (min_x, min_y, max_x, max_y) = polygon_bounds(&obs.polygon);
+            // Apply buffer - expand obstacle bounds
+            let min_x = min_x - buffer;
+            let min_y = min_y - buffer;
+            let max_x = max_x + buffer;
+            let max_y = max_y + buffer;
             let mid_x = min_x + (max_x - min_x) / 2.0;
 
             let node_idx = nodes.len();
@@ -857,6 +876,7 @@ impl OrthogonalVisGraphGenerator {
         &mut self,
         obstacles: &[ObstacleInput],
         connectors: &[ConnectorInput],
+        buffer: f64,
     ) -> (Vec<Event>, Vec<ScanlineNode>) {
         let mut events = Vec::new();
         let mut nodes = Vec::new();
@@ -864,6 +884,11 @@ impl OrthogonalVisGraphGenerator {
         // Create obstacle events
         for obs in obstacles {
             let (min_x, min_y, max_x, max_y) = polygon_bounds(&obs.polygon);
+            // Apply buffer - expand obstacle bounds
+            let min_x = min_x - buffer;
+            let min_y = min_y - buffer;
+            let max_x = max_x + buffer;
+            let max_y = max_y + buffer;
             let mid_y = min_y + (max_y - min_y) / 2.0;
 
             let node_idx = nodes.len();

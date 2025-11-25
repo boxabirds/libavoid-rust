@@ -826,9 +826,15 @@ impl Router {
         // Create connector input for this route
         let connectors = vec![ConnectorInput::new(0, src, dst)];
 
-        // Generate orthogonal visibility graph
+        // Get shape buffer distance from parameter
+        let buffer = self.parameters
+            .get(&RoutingParameter::ShapeBufferDistance)
+            .copied()
+            .unwrap_or(0.0);
+
+        // Generate orthogonal visibility graph with buffer
         let mut generator = OrthogonalVisGraphGenerator::new();
-        let ortho_graph = generator.generate(&obstacles, &connectors);
+        let ortho_graph = generator.generate_with_buffer(&obstacles, &connectors, buffer);
 
         // Find start and end vertices in the graph
         let start_vertex = ortho_graph.vertices()
@@ -1059,9 +1065,19 @@ impl Router {
         self.vis_graph.clear();
         self.vis_orth_graph.clear();
 
-        // Add vertices for all shape corners
+        // Get shape buffer distance from parameter
+        let buffer = self.parameters
+            .get(&RoutingParameter::ShapeBufferDistance)
+            .copied()
+            .unwrap_or(0.0);
+
+        // Add vertices for all shape corners (offset by buffer if non-zero)
         for shape in self.shapes.values() {
-            let poly = shape.polygon();
+            let poly = if buffer > 0.0 {
+                shape.polygon().offset_polygon(buffer)
+            } else {
+                shape.polygon().clone()
+            };
             for point in poly.points() {
                 self.vis_graph.add_vertex(*point);
                 self.vis_orth_graph.add_vertex(*point);

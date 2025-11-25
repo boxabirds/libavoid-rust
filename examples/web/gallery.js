@@ -76,6 +76,53 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // Global examples object
 window.examples = {};
 
+// Track which examples have been run (for re-triggering on global nudge change)
+window.runExamples = new Set();
+
+// Global parameters (used by examples that support nudging)
+window.globalNudgeDistance = 10;
+window.globalShapeBuffer = 4;
+
+// Apply global parameters and re-run all previously run examples
+window.applyGlobalSettings = function() {
+  const nudgeDistance = parseFloat(document.getElementById('global-nudge-input').value) || 10;
+  const shapeBuffer = parseFloat(document.getElementById('global-buffer-input').value) || 4;
+
+  window.globalNudgeDistance = nudgeDistance;
+  window.globalShapeBuffer = shapeBuffer;
+
+  console.log(`applyGlobalSettings: nudge=${nudgeDistance}, buffer=${shapeBuffer}`);
+
+  // Re-run all previously run examples
+  const rerunCount = window.runExamples.size;
+  console.log(`applyGlobalSettings: ${rerunCount} examples to re-run:`, [...window.runExamples]);
+  if (rerunCount > 0) {
+    window.runExamples.forEach(exampleName => {
+      const example = window.examples[exampleName];
+      if (example && typeof example.run === 'function') {
+        console.log(`  Re-running example: ${exampleName}`);
+        example.run();
+      }
+    });
+    document.getElementById('nudge-status').textContent =
+      `Applied nudge=${nudgeDistance}px, buffer=${shapeBuffer}px to ${rerunCount} example(s)`;
+  } else {
+    document.getElementById('nudge-status').textContent =
+      'No examples run yet. Run some examples first!';
+  }
+};
+
+// Legacy function for backwards compatibility
+window.applyGlobalNudge = function(value) {
+  document.getElementById('global-nudge-input').value = value;
+  window.applyGlobalSettings();
+};
+
+// Helper to mark an example as run
+window.markExampleRun = function(name) {
+  window.runExamples.add(name);
+};
+
 // Helper to create a rectangle polygon from top-left corner
 function createRectPolygon(x, y, width, height) {
   const centerX = x + width / 2;
@@ -172,11 +219,14 @@ function clearLog(outputId) {
 
 window.examples.basic = {
   run: function() {
+    window.markExampleRun('basic');
     clearSvg('canvas-basic');
     clearLog('output-basic');
     log('output-basic', 'Creating router with polyline routing...');
 
     const router = new Router(POLY_LINE_ROUTING);
+    // Apply global shape buffer
+    router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
 
     // Define obstacle (centered at 200, 125)
     const obstacleX = 175;
@@ -255,11 +305,13 @@ window.examples.basic = {
 
 window.examples.orthogonal = {
   run: function() {
+    window.markExampleRun('orthogonal');
     clearSvg('canvas-orthogonal');
     clearLog('output-orthogonal');
     log('output-orthogonal', 'Creating router with orthogonal routing...');
 
     const router = new Router(ORTHOGONAL_ROUTING);
+    router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
 
     // Obstacle
     const obstacleX = 150;
@@ -327,11 +379,13 @@ window.examples.orthogonal = {
 
 window.examples.multi = {
   run: function() {
+    window.markExampleRun('multi');
     clearSvg('canvas-multi');
     clearLog('output-multi');
     log('output-multi', 'Creating maze with multiple obstacles...');
 
     const router = new Router(POLY_LINE_ROUTING);
+    router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
 
     // Define multiple obstacles to create a maze
     const obstacles = [
@@ -401,10 +455,12 @@ window.examples.shapes = {
   connRef: null,
 
   run: async function() {
+    window.markExampleRun('shapes');
     clearSvg('canvas-shapes');
     clearLog('output-shapes');
 
     this.router = new Router(POLY_LINE_ROUTING);
+    this.router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
     this.shapes = [];
 
     log('output-shapes', '=== Shape Operations Sequence ===\n');
@@ -533,12 +589,14 @@ window.examples.shapes = {
 
 window.examples.batch = {
   runBatch: function() {
+    window.markExampleRun('batch');
     clearSvg('canvas-batch');
     clearLog('output-batch');
 
     log('output-batch', '=== Batched Transaction Mode ===\n');
 
     const router = new Router(POLY_LINE_ROUTING);
+    router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
     const startTime = performance.now();
 
     // Add multiple shapes and connectors in a batch
@@ -673,12 +731,14 @@ window.examples.batch = {
 
 window.examples.connectors = {
   run: function() {
+    window.markExampleRun('connectors');
     clearSvg('canvas-connectors');
     clearLog('output-connectors');
 
     log('output-connectors', 'Creating multiple simultaneous connectors...\n');
 
     const router = new Router(POLY_LINE_ROUTING);
+    router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
 
     // Central obstacle
     const obstacleX = 160;
@@ -745,12 +805,14 @@ window.examples.connectors = {
 
 window.examples.crossing = {
   run: function() {
+    window.markExampleRun('crossing');
     clearSvg('canvas-crossing');
     clearLog('output-crossing');
 
     log('output-crossing', 'Routing connectors that will cross...\n');
 
     const router = new Router(POLY_LINE_ROUTING);
+    router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
 
     // Two connectors that must cross
     const connectorDefs = [
@@ -867,10 +929,19 @@ window.examples.interactive = {
   init: function() {
     this.router = new Router(ORTHOGONAL_ROUTING); // Use orthogonal for nudging
 
+    // Enable transaction mode - REQUIRED for nudging to work
+    this.router.setTransactionUse(true);
+
     // Enable nudging for PCB-style parallel lanes
     this.router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
-    // Set nudging distance
-    this.router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, 8.0);
+    // Set nudging distance from global setting
+    this.router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, window.globalNudgeDistance);
+    // Set buffer distance between routes and obstacles
+    this.router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
+
+    // Debug: verify parameters were set
+    console.log('Interactive init: nudge=' + this.router.routingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE) +
+                ', buffer=' + this.router.routingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE));
 
     this.shapes = [];
     this.connectors = [];
@@ -882,6 +953,48 @@ window.examples.interactive = {
     const canvas = document.getElementById('canvas-interactive');
     canvas.onclick = (e) => this._handleClick(e);
 
+    this._updateModeDisplay();
+
+    // Mark as run so global nudge changes will update it
+    window.markExampleRun('interactive');
+  },
+
+  // Re-run with current global nudge distance
+  run: function() {
+    window.markExampleRun('interactive');
+    // Re-initialize router with new nudge distance
+    const oldShapes = [...this.shapes];
+    const oldConnectors = [...this.connectors];
+
+    this.router = new Router(ORTHOGONAL_ROUTING);
+    this.router.setTransactionUse(true);
+    this.router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
+    this.router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, window.globalNudgeDistance);
+    this.router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, window.globalShapeBuffer);
+
+    // Re-add shapes
+    this.shapes = [];
+    oldShapes.forEach(s => {
+      const poly = createRectPolygon(s.x, s.y, s.w, s.h);
+      const shape = new ShapeRef(this.router, poly);
+      this.router.addShape(shape);
+      this.shapes.push({ shape, x: s.x, y: s.y, w: s.w, h: s.h });
+    });
+
+    // Re-add connectors using stored raw coordinates
+    this.connectors = [];
+    oldConnectors.forEach(c => {
+      const srcPt = new Point(c.srcX, c.srcY);
+      const dstPt = new Point(c.dstX, c.dstY);
+      const conn = ConnRef.createWithEndpoints(this.router,
+        new ConnEnd(srcPt),
+        new ConnEnd(dstPt));
+      conn.setRoutingType(ORTHOGONAL_ROUTING);
+      this.router.addConnector(conn);
+      this.connectors.push({ conn, srcX: c.srcX, srcY: c.srcY, dstX: c.dstX, dstY: c.dstY, color: c.color });
+    });
+
+    this._rerouteAndRedraw();
     this._updateModeDisplay();
   },
 
@@ -935,24 +1048,30 @@ window.examples.interactive = {
   },
 
   _handleConnectorClick: function(x, y) {
-    const pt = new Point(x, y);
-
     if (!this.pendingConnector) {
       // First click - set source, assign color now
+      // Store raw coordinates, not WASM Point objects (which can become invalid)
       const color = CONNECTOR_PALETTE[this.nextColorIndex % CONNECTOR_PALETTE.length];
-      this.pendingConnector = { src: pt, color };
+      this.pendingConnector = { srcX: x, srcY: y, color };
       drawPoint('canvas-interactive', x, y, 6, color);
     } else {
-      // Second click - create connector
+      // Second click - create connector using fresh Point objects
+      const srcPt = new Point(this.pendingConnector.srcX, this.pendingConnector.srcY);
+      const dstPt = new Point(x, y);
+
       const conn = ConnRef.createWithEndpoints(this.router,
-        new ConnEnd(this.pendingConnector.src),
-        new ConnEnd(pt));
+        new ConnEnd(srcPt),
+        new ConnEnd(dstPt));
+      conn.setRoutingType(ORTHOGONAL_ROUTING);
       this.router.addConnector(conn);
 
+      // Store raw coordinates for redrawing, not WASM objects
       this.connectors.push({
         conn,
-        src: this.pendingConnector.src,
-        dst: pt,
+        srcX: this.pendingConnector.srcX,
+        srcY: this.pendingConnector.srcY,
+        dstX: x,
+        dstY: y,
         color: this.pendingConnector.color
       });
 
@@ -965,6 +1084,8 @@ window.examples.interactive = {
   },
 
   _rerouteAndRedraw: function() {
+    console.log('_rerouteAndRedraw: nudge=' + window.globalNudgeDistance + ', buffer=' + window.globalShapeBuffer);
+    console.log('  connectors:', this.connectors.length, 'shapes:', this.shapes.length);
     this.router.processTransaction();
 
     clearSvg('canvas-interactive');
@@ -976,13 +1097,22 @@ window.examples.interactive = {
     });
 
     // Draw connectors with their assigned colors
-    this.connectors.forEach(({ conn, src, dst, color }) => {
-      drawPoint('canvas-interactive', src.x, src.y, 5, color);
-      drawPoint('canvas-interactive', dst.x, dst.y, 5, color);
+    this.connectors.forEach(({ conn, srcX, srcY, dstX, dstY, color }, idx) => {
+      drawPoint('canvas-interactive', srcX, srcY, 5, color);
+      drawPoint('canvas-interactive', dstX, dstY, 5, color);
 
       const route = this.router.getConnectorRoute(conn.id());
       if (route) {
         drawRoute('canvas-interactive', route, color, 3);
+        // Debug: log first route's points
+        if (idx === 0 && route.size() > 0) {
+          const pts = [];
+          for (let i = 0; i < route.size(); i++) {
+            const p = route.at(i);
+            if (p) pts.push(`(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
+          }
+          console.log('Route 0:', pts.join(' -> '));
+        }
       }
     });
   },
@@ -1005,10 +1135,12 @@ window.examples.interactive = {
 
 window.examples.nudging = {
   run: function() {
+    window.markExampleRun('nudging');
     clearSvg('canvas-nudging');
     clearLog('output-nudging');
 
-    log('output-nudging', 'Demonstrating route nudging to prevent overlap...\n');
+    const nudgeDist = window.globalNudgeDistance;
+    log('output-nudging', `Demonstrating route nudging (distance: ${nudgeDist}px)...\n`);
 
     // Create router with orthogonal routing
     const router = new Router(ORTHOGONAL_ROUTING);
@@ -1016,20 +1148,23 @@ window.examples.nudging = {
     // Enable transaction mode - required for nudging to work
     router.setTransactionUse(true);
 
-    // Enable route nudging
+    // Enable route nudging with global distance
     router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
+    router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, nudgeDist);
+    // Set buffer distance between routes and obstacles
+    router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, nudgeDist);
 
     // Create a simple obstacle
     const obstaclePoly = createRectPolygon(150, 80, 100, 90);
     const obstacle = new ShapeRef(router, obstaclePoly);
     router.addShape(obstacle);
 
-    // Create multiple connectors that will have overlapping paths
+    // Create multiple connectors with SAME endpoints - they will overlap before nudging
+    // All routes start/end at same Y=125 and must route around obstacle at Y=80-170
     const connectorDefs = [
-      { src: { x: 30, y: 50 }, dst: { x: 370, y: 50 }, color: '#3b82f6', name: 'Route 1' },
-      { src: { x: 30, y: 70 }, dst: { x: 370, y: 70 }, color: '#10b981', name: 'Route 2' },
-      { src: { x: 30, y: 90 }, dst: { x: 370, y: 90 }, color: '#8b5cf6', name: 'Route 3' },
-      { src: { x: 30, y: 200 }, dst: { x: 370, y: 200 }, color: '#f59e0b', name: 'Route 4' },
+      { src: { x: 30, y: 125 }, dst: { x: 370, y: 125 }, color: '#3b82f6', name: 'Route 1' },
+      { src: { x: 30, y: 125 }, dst: { x: 370, y: 125 }, color: '#10b981', name: 'Route 2' },
+      { src: { x: 30, y: 125 }, dst: { x: 370, y: 125 }, color: '#8b5cf6', name: 'Route 3' },
     ];
 
     const connectors = [];
@@ -1088,13 +1223,16 @@ window.examples.nudging = {
 // ============================================================================
 
 window.examples.comparison = {
-  // Configuration for each panel: [canvasId, enableNudge, nudgeDistance]
-  PANEL_CONFIG: [
-    { id: 'canvas-compare-1', enableNudge: false, nudgeDistance: 0 },
-    { id: 'canvas-compare-2', enableNudge: true, nudgeDistance: 4 },
-    { id: 'canvas-compare-3', enableNudge: true, nudgeDistance: 8 },
-    { id: 'canvas-compare-4', enableNudge: true, nudgeDistance: 16 },
-  ],
+  // Panel config is generated dynamically based on global nudge distance
+  getPanelConfig: function() {
+    const base = window.globalNudgeDistance;
+    return [
+      { id: 'canvas-compare-1', enableNudge: false, nudgeDistance: 0, label: 'Nudging OFF' },
+      { id: 'canvas-compare-2', enableNudge: true, nudgeDistance: Math.max(1, base * 0.5), label: `Nudge = ${Math.max(1, base * 0.5)}px` },
+      { id: 'canvas-compare-3', enableNudge: true, nudgeDistance: base, label: `Nudge = ${base}px` },
+      { id: 'canvas-compare-4', enableNudge: true, nudgeDistance: base * 2, label: `Nudge = ${base * 2}px` },
+    ];
+  },
 
   // Obstacle in the center to force routes around it
   OBSTACLE: { x: 70, y: 50, width: 60, height: 50 },
@@ -1114,10 +1252,14 @@ window.examples.comparison = {
     // Enable transaction mode - required for nudging to work
     router.setTransactionUse(true);
 
-    // Configure nudging
+    // Configure nudging and buffer distance
     if (panelConfig.enableNudge) {
       router.setRoutingOption(RoutingOption.NUDGE_ORTHOGONAL_ROUTES, true);
       router.setRoutingParameter(RoutingParameter.IDEAL_NUDGING_DISTANCE, panelConfig.nudgeDistance);
+      router.setRoutingParameter(RoutingParameter.SHAPE_BUFFER_DISTANCE, panelConfig.nudgeDistance);
+      console.log(`Panel ${panelConfig.id}: Nudging enabled, distance=${panelConfig.nudgeDistance}`);
+    } else {
+      console.log(`Panel ${panelConfig.id}: Nudging disabled`);
     }
 
     // Create obstacle if defined
@@ -1156,11 +1298,13 @@ window.examples.comparison = {
       const route = router.getConnectorRoute(conn.id());
       if (route && route.size() > 0) {
         drawRoute(panelConfig.id, route, color, 1.5);
-        // Log first point Y for debugging
-        const firstPt = route.at(0);
-        if (firstPt && idx === 0) {
-          console.log(`Panel ${panelConfig.id}: Route ${idx} Y=${firstPt.y}, size=${route.size()}`);
+        // Log all route points for debugging
+        const points = [];
+        for (let i = 0; i < route.size(); i++) {
+          const pt = route.at(i);
+          if (pt) points.push(`(${pt.x.toFixed(1)},${pt.y.toFixed(1)})`);
         }
+        console.log(`Panel ${panelConfig.id}: Route ${idx} [${points.join(' -> ')}]`);
       } else {
         console.log(`Panel ${panelConfig.id}: Route ${idx} has no route!`);
       }
@@ -1168,19 +1312,26 @@ window.examples.comparison = {
   },
 
   run: function() {
+    window.markExampleRun('comparison');
     clearLog('output-comparison');
-    log('output-comparison', 'Routing Options Comparison:');
+    log('output-comparison', `Routing Options Comparison (base: ${window.globalNudgeDistance}px):`);
     log('output-comparison', '');
 
+    const panelConfig = this.getPanelConfig();
+
+    // Update labels in DOM
+    const labels = document.querySelectorAll('.comparison-label');
+    panelConfig.forEach((config, i) => {
+      if (labels[i]) {
+        labels[i].textContent = config.label;
+      }
+    });
+
     // Run each panel
-    this.PANEL_CONFIG.forEach((config, i) => {
+    panelConfig.forEach((config, i) => {
       clearSvg(config.id);
       this.runPanel(config);
-
-      const label = config.enableNudge
-        ? `Panel ${i + 1}: Nudge = ${config.nudgeDistance}px`
-        : `Panel ${i + 1}: Nudging OFF (routes overlap)`;
-      log('output-comparison', label);
+      log('output-comparison', `Panel ${i + 1}: ${config.label}`);
     });
 
     log('output-comparison', '');
@@ -1188,7 +1339,8 @@ window.examples.comparison = {
   },
 
   reset: function() {
-    this.PANEL_CONFIG.forEach(config => clearSvg(config.id));
+    const panelConfig = this.getPanelConfig();
+    panelConfig.forEach(config => clearSvg(config.id));
     clearLog('output-comparison');
     log('output-comparison', 'Click "Run Comparison" to see different nudging settings');
   }
@@ -1207,6 +1359,15 @@ async function initializeGallery() {
 
     // Initialize interactive example
     window.examples.interactive.init();
+
+    // Set up global controls (must be done after module loads)
+    const nudgeInput = document.getElementById('global-nudge-input');
+    const bufferInput = document.getElementById('global-buffer-input');
+    const applyBtn = document.getElementById('apply-nudge-btn');
+
+    nudgeInput.addEventListener('change', () => window.applyGlobalSettings());
+    bufferInput.addEventListener('change', () => window.applyGlobalSettings());
+    applyBtn.addEventListener('click', () => window.applyGlobalSettings());
 
     loading.style.display = 'none';
     gallery.style.display = 'grid';

@@ -697,16 +697,22 @@ impl ChannelRouter {
             return;
         }
 
-        // Filter out shape-connected segments if option is disabled
+        // Mark shape-connected segments as FIXED if option is disabled
+        // C++ ref: orthogonal.cpp:2189-2195 - segments are kept but marked fixed
+        // They still participate in constraints (other segments must avoid them)
         if !nudge_shape_connected {
             #[cfg(test)]
-            {
-                let before = segments.len();
-                segments.retain(|seg| !seg.connected_to_shape);
-                eprintln!("  filtered shape-connected: {} -> {} segments", before, segments.len());
+            let count_before = segments.iter().filter(|s| s.connected_to_shape).count();
+            for seg in segments.iter_mut() {
+                if seg.connected_to_shape {
+                    seg.fixed = true;
+                    seg.segment_type = SegmentType::Fixed;
+                    seg.min_limit = seg.position;
+                    seg.max_limit = seg.position;
+                }
             }
-            #[cfg(not(test))]
-            segments.retain(|seg| !seg.connected_to_shape);
+            #[cfg(test)]
+            eprintln!("  marked {} shape-connected segments as fixed", count_before);
         }
 
         // Note: NudgeOrthogonalTouchingColinearSegments controls whether these segments

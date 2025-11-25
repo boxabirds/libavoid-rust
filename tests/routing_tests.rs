@@ -1,4 +1,4 @@
-use libavoid::{Router, Point, Rectangle, ConnEnd, ConnType, PolygonInterface, Polygon};
+use libavoid::{Router, Point, Rectangle, ConnEnd, ConnRef, ConnType, PolygonInterface, Polygon};
 
 #[test]
 fn test_polyline_routes_around_obstacle() {
@@ -390,4 +390,62 @@ fn test_orthogonal_nudging_via_router() {
     // After nudging, the Y coordinates should be different
     let all_same = (y1 - y2).abs() < 0.1 && (y2 - y3).abs() < 0.1;
     assert!(!all_same, "Routes should be nudged apart! Y coords: {}, {}, {}", y1, y2, y3);
+}
+
+#[test]
+fn test_shape_buffer_distance() {
+    use libavoid::RoutingParameter;
+    
+    // Test with buffer = 10
+    let mut router = Router::new(ConnType::Orthogonal as u32);
+    router.set_transaction_use(true);
+    router.set_routing_parameter(RoutingParameter::ShapeBufferDistance, 10.0);
+    
+    // Obstacle centered at (100, 100), size 50x50
+    // Bounds: (75, 75) to (125, 125)
+    let obs = Rectangle::new(Point::new(100.0, 100.0), 50.0, 50.0);
+    router.add_shape(obs.into(), 1);
+    
+    // Route from left to right, passing through obstacle Y level
+    let src = ConnEnd::new(Point::new(50.0, 100.0));
+    let dst = ConnEnd::new(Point::new(150.0, 100.0));
+    let mut conn = ConnRef::with_endpoints(1, src, dst);
+    conn.set_routing_type(ConnType::Orthogonal);
+    router.add_connector(conn);
+    
+    router.process_transaction();
+    
+    let route = router.get_connector(1).unwrap().display_route().unwrap();
+    println!("Route with buffer=10:");
+    for i in 0..route.size() {
+        let p = route.at(i);
+        println!("  ({}, {})", p.x, p.y);
+    }
+    
+    // The route should go around the obstacle with a 10px buffer
+    // Obstacle top edge is at Y=75, so route should go through Y <= 65 (75-10)
+    // OR obstacle bottom edge is at Y=125, so route should go through Y >= 135 (125+10)
+    
+    // Check that no route point is within 10px of obstacle edges
+    let obs_min_x = 75.0;
+    let obs_min_y = 75.0;
+    let obs_max_x = 125.0;
+    let obs_max_y = 125.0;
+    let buffer = 10.0;
+    
+    for i in 0..route.size() {
+        let p = route.at(i);
+        // Skip start/end points
+        if i == 0 || i == route.size() - 1 {
+            continue;
+        }
+        
+        // Check the point isn't inside the buffered obstacle region
+        // If X is within obstacle X range, Y must be outside buffered Y range
+        if p.x > obs_min_x && p.x < obs_max_x {
+            // Inside obstacle X range - Y must have buffer
+            assert!(p.y <= obs_min_y - buffer || p.y >= obs_max_y + buffer,
+                "Point ({}, {}) is inside obstacle X range but Y doesn't respect buffer", p.x, p.y);
+        }
+    }
 }

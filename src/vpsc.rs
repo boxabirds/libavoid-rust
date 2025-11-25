@@ -367,7 +367,8 @@ impl IncSolver {
         // Process constraints in order until no more violations
         // C++ ref: libavoid/vpsc.cpp:284 - equality constraints are always processed
         let max_iterations = self.constraints.len() * 2 + 1;
-        for _iter in 0..max_iterations {
+        #[allow(unused_variables)]
+        for iter in 0..max_iterations {
             let mut satisfied_any = false;
 
             for cid in 0..self.constraints.len() {
