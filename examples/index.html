@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>libavoid-rust Examples</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #eee;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 50px;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      background: linear-gradient(90deg, #4ecca3, #00d9ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .tagline {
+      font-size: 1.1rem;
+      color: #888;
+      margin-bottom: 20px;
+    }
+
+    .badges {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      background: rgba(255,255,255,0.1);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      color: #aaa;
+    }
+
+    .examples-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 25px;
+      margin-bottom: 50px;
+    }
+
+    .example-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 25px;
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .example-card:hover {
+      transform: translateY(-4px);
+      border-color: #4ecca3;
+      box-shadow: 0 10px 40px rgba(78, 204, 163, 0.15);
+    }
+
+    .example-card h2 {
+      font-size: 1.3rem;
+      margin-bottom: 8px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .example-card .icon {
+      font-size: 1.5rem;
+    }
+
+    .example-card p {
+      color: #999;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 15px;
+    }
+
+    .example-card .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .example-card .feature {
+      background: rgba(78, 204, 163, 0.15);
+      color: #4ecca3;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+
+    .example-card.game {
+      border-color: rgba(233, 69, 96, 0.3);
+    }
+
+    .example-card.game:hover {
+      border-color: #e94560;
+      box-shadow: 0 10px 40px rgba(233, 69, 96, 0.15);
+    }
+
+    .example-card.game .feature {
+      background: rgba(233, 69, 96, 0.15);
+      color: #e94560;
+    }
+
+    .info-section {
+      background: rgba(255,255,255,0.03);
+      border-radius: 12px;
+      padding: 30px;
+      margin-bottom: 30px;
+    }
+
+    .info-section h3 {
+      font-size: 1.1rem;
+      margin-bottom: 15px;
+      color: #4ecca3;
+    }
+
+    .info-section p {
+      color: #888;
+      line-height: 1.6;
+      margin-bottom: 10px;
+    }
+
+    .info-section code {
+      background: rgba(0,0,0,0.3);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.9rem;
+      color: #4ecca3;
+    }
+
+    .links {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .links a {
+      color: #4ecca3;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.95rem;
+      transition: color 0.2s;
+    }
+
+    .links a:hover {
+      color: #6fe8c0;
+    }
+
+    footer {
+      text-align: center;
+      color: #555;
+      font-size: 0.85rem;
+      margin-top: 40px;
+    }
+
+    footer a {
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>libavoid-rust</h1>
+      <p class="tagline">Fast, object-avoiding connector routing for interactive diagrams</p>
+      <div class="badges">
+        <span class="badge">Rust + WebAssembly</span>
+        <span class="badge">Polyline Routing</span>
+        <span class="badge">Orthogonal Routing</span>
+        <span class="badge">LGPL-2.1</span>
+      </div>
+    </header>
+
+    <div class="examples-grid">
+      <a href="web/gallery.html" class="example-card">
+        <h2><span class="icon">&#128202;</span> Examples Gallery</h2>
+        <p>
+          Interactive demonstrations of all routing capabilities.
+          Explore polyline routing, orthogonal paths, shape operations,
+          nudging, and more.
+        </p>
+        <div class="features">
+          <span class="feature">10 Examples</span>
+          <span class="feature">Interactive</span>
+          <span class="feature">Configurable</span>
+        </div>
+      </a>
+
+      <a href="zombies/index.html" class="example-card game">
+        <h2><span class="icon">&#129503;</span> Zombie Chase</h2>
+        <p>
+          A playable game showcasing real-time pathfinding.
+          Survive increasingly difficult rounds as zombies chase you
+          using optimal routes.
+        </p>
+        <div class="features">
+          <span class="feature">Pathfinding Demo</span>
+          <span class="feature">Multiple Rounds</span>
+          <span class="feature">WASD Controls</span>
+        </div>
+      </a>
+
+      <a href="web/index.html" class="example-card">
+        <h2><span class="icon">&#128187;</span> Basic Example</h2>
+        <p>
+          Minimal example showing the core routing API.
+          See how to create shapes, connectors, and process routes
+          with just a few lines of code.
+        </p>
+        <div class="features">
+          <span class="feature">Getting Started</span>
+          <span class="feature">Simple API</span>
+        </div>
+      </a>
+    </div>
+
+    <div class="info-section">
+      <h3>Running Locally</h3>
+      <p>
+        Start a local server from this directory:
+      </p>
+      <p>
+        <code>python3 -m http.server 8080</code>
+      </p>
+      <p>
+        Then open <code>http://localhost:8080</code> in your browser.
+      </p>
+    </div>
+
+    <div class="info-section">
+      <h3>About</h3>
+      <p>
+        libavoid-rust is a Rust port of the libavoid C++ library, originally created by
+        Michael Wybrow at Monash University. It provides efficient connector routing
+        algorithms for diagram editors, supporting both polyline (any-angle) and
+        orthogonal (horizontal/vertical) routing modes.
+      </p>
+    </div>
+
+    <div class="links">
+      <a href="https://github.com/mjwybrow/adaptagrams">
+        <span>&#128279;</span> Original C++ Library
+      </a>
+      <a href="https://www.adaptagrams.org/">
+        <span>&#128218;</span> Adaptagrams Project
+      </a>
+    </div>
+
+    <footer>
+      <p>Port of <a href="https://github.com/mjwybrow/adaptagrams">libavoid</a> by Michael Wybrow, Monash University</p>
+    </footer>
+  </div>
+</body>
+</html>
