@@ -93,6 +93,17 @@
       color: #74b9ff;
     }
 
+    .health-stat {
+      width: 100%;
+      justify-content: center;
+      margin-bottom: 5px;
+    }
+
+    .health-bar {
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+
     .debug-controls {
       margin-top: 15px;
       display: flex;
@@ -181,7 +192,7 @@
 <body>
   <h1>Zombie Chase</h1>
   <div class="instructions">
-    Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> keys. Survive each round!
+    Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> keys. Collect 🍎 for health. Survive each round!
   </div>
 
   <div id="loading">Loading WASM module...</div>
@@ -199,6 +210,10 @@
   </div>
 
   <div id="hud" style="display: none;">
+    <div class="stat health-stat">
+      <span class="label">Health:</span>
+      <span id="health-bar" class="health-bar"></span>
+    </div>
     <div class="stat" id="round">
       <span class="label">Round:</span>
       <span class="value" id="round-value">1</span>

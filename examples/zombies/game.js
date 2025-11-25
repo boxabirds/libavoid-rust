@@ -21,12 +21,39 @@ const OBSTACLE_COUNT = 20;
 const OBSTACLE_MIN_SIZE = 40;
 const OBSTACLE_MAX_SIZE = 100;
 const PLAYER_SPEED = 150; // pixels per second
-const BASE_ZOMBIE_SPEED = 30;  // pixels per second
+const BASE_ZOMBIE_SPEED = 50;  // pixels per second
+const ZOMBIE_SPEED_VARIATION = 0.05; // +/- 5% speed variation per zombie
 const BASE_ROUND_DURATION = 10; // seconds for round 1
 const ROUND_TIME_INCREMENT = 5; // additional seconds per round
 const ZOMBIE_SPEED_MULTIPLIER = 1.10; // 10% faster each round
+
+// Zombie wobble/stumble effect
+const ZOMBIE_WOBBLE_AMOUNT = 3; // max pixels of wobble offset
+const ZOMBIE_WOBBLE_SPEED = 8; // wobble frequency
 const CATCH_DISTANCE = 20;
+const SCARED_DISTANCE = 50; // Distance at which player looks scared
 const ENTITY_SIZE = 24;
+const APPLE_SIZE = 20;
+const APPLE_COLLECT_DISTANCE = 25;
+const STARTING_HEALTH = 5;
+const MAX_HEALTH = 20;
+const DAMAGE_INTERVAL_MS = 250; // Take damage every 250ms while touching zombie
+
+// Player emoji states
+const EMOJI_NORMAL = '\u{1F642}';  // 🙂
+const EMOJI_SCARED = '\u{1F633}';  // 😳
+const EMOJI_DEAD = '\u{1F480}';    // 💀
+
+// Zombie emoji variants
+const ZOMBIE_EMOJIS = [
+  '\u{1F9DF}',           // 🧟
+  '\u{1F9DF}\u200D\u2640\uFE0F',  // 🧟‍♀️
+  '\u{1F9DF}\u200D\u2642\uFE0F',  // 🧟‍♂️
+];
+
+// Apple emoji
+const EMOJI_APPLE = '\u{1F34E}';  // 🍎
+
 const SPAWN_MARGIN = 50;
 const MIN_SPAWN_DISTANCE = 150; // Minimum distance between player and zombie spawn
 
@@ -52,13 +79,16 @@ class ZombieGame {
     this.obstacles = [];
     this.player = { x: 0, y: 0 };
     this.zombies = []; // Array of zombie objects
+    this.apples = []; // Collectible apples on the map
 
     this.keysPressed = new Set();
     this.gameRunning = false;
     this.timeRemaining = BASE_ROUND_DURATION;
     this.lastFrameTime = 0;
+    this.lastDamageTime = 0; // Track when player last took damage
 
     this.round = 1;
+    this.health = STARTING_HEALTH;
     this.showPaths = true; // Debug paths on by default
 
     this.svg = null;
@@ -80,15 +110,43 @@ class ZombieGame {
   setupInputHandlers() {
     document.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();
+      // Support both WASD and arrow keys
       if (['w', 'a', 's', 'd'].includes(key)) {
         e.preventDefault();
         this.keysPressed.add(key);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.keysPressed.add('w');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.keysPressed.add('s');
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        this.keysPressed.add('a');
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        this.keysPressed.add('d');
+      } else if (e.key === ' ' || e.key === 'Enter') {
+        // Space or Enter to advance from round complete screen
+        e.preventDefault();
+        if (!this.gameRunning && this.countdownTimer) {
+          // Round complete - advance to next round
+          this.nextRound();
+        } else if (!this.gameRunning) {
+          // Game over - restart
+          this.restart();
+        }
       }
     });
 
     document.addEventListener('keyup', (e) => {
       const key = e.key.toLowerCase();
       this.keysPressed.delete(key);
+      // Also handle arrow keys on release
+      if (e.key === 'ArrowUp') this.keysPressed.delete('w');
+      if (e.key === 'ArrowDown') this.keysPressed.delete('s');
+      if (e.key === 'ArrowLeft') this.keysPressed.delete('a');
+      if (e.key === 'ArrowRight') this.keysPressed.delete('d');
     });
 
     // Debug checkbox handler
@@ -113,6 +171,7 @@ class ZombieGame {
   startNewGame() {
     this.clearCountdownTimer();
     this.round = 1;
+    this.health = STARTING_HEALTH;
     this.startRound();
   }
 
@@ -128,6 +187,7 @@ class ZombieGame {
     this.createRouter();
     this.generateObstacles();
     this.spawnEntities();
+    this.spawnApples();
     this.drawObstacles();
     this.createEntityElements();
     this.updateAllPaths();
@@ -136,6 +196,7 @@ class ZombieGame {
     this.timeRemaining = BASE_ROUND_DURATION + (this.round - 1) * ROUND_TIME_INCREMENT;
     this.gameRunning = true;
     this.lastFrameTime = performance.now();
+    this.lastDamageTime = 0;
 
     document.getElementById('game-over').style.display = 'none';
     this.updateHUD();
@@ -212,7 +273,7 @@ class ZombieGame {
     // Spawn zombies (one per round)
     this.zombies = [];
     const zombieCount = this.round;
-    const zombieSpeed = BASE_ZOMBIE_SPEED * Math.pow(ZOMBIE_SPEED_MULTIPLIER, this.round - 1);
+    const baseSpeed = BASE_ZOMBIE_SPEED * Math.pow(ZOMBIE_SPEED_MULTIPLIER, this.round - 1);
 
     for (let i = 0; i < zombieCount; i++) {
       let pos;
@@ -222,6 +283,10 @@ class ZombieGame {
         attempts++;
       } while (this.distance(this.player, pos) < MIN_SPAWN_DISTANCE && attempts < 100);
 
+      // Each zombie gets +/- 5% speed variation
+      const speedVariation = 1 + (Math.random() * 2 - 1) * ZOMBIE_SPEED_VARIATION;
+      const zombieSpeed = baseSpeed * speedVariation;
+
       this.zombies.push({
         x: pos.x,
         y: pos.y,
@@ -230,8 +295,29 @@ class ZombieGame {
         pathProgress: 0,
         speed: zombieSpeed,
         color: ZOMBIE_COLORS[i % ZOMBIE_COLORS.length],
+        emoji: ZOMBIE_EMOJIS[Math.floor(Math.random() * ZOMBIE_EMOJIS.length)],
         element: null,
-        pathElement: null
+        pathElement: null,
+        // Wobble state - random phase so zombies don't wobble in sync
+        wobblePhase: Math.random() * Math.PI * 2,
+        wobbleTime: 0
+      });
+    }
+  }
+
+  spawnApples() {
+    this.apples = [];
+    // Number of apples is round +/- 1
+    const baseCount = this.round;
+    const variation = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+    const appleCount = Math.max(1, baseCount + variation);
+
+    for (let i = 0; i < appleCount; i++) {
+      const pos = this.findSpawnPoint();
+      this.apples.push({
+        x: pos.x,
+        y: pos.y,
+        element: null
       });
     }
   }
@@ -329,18 +415,46 @@ class ZombieGame {
         this.updateZombiePath(zombie);
       }
 
-      // Check collision
+      // Check collision - take damage if touching zombie
       if (this.distance(this.player, zombie) < CATCH_DISTANCE) {
-        this.lose();
-        return;
+        // Take damage every DAMAGE_INTERVAL_MS while touching
+        if (currentTime - this.lastDamageTime >= DAMAGE_INTERVAL_MS) {
+          this.health--;
+          this.lastDamageTime = currentTime;
+
+          if (this.health <= 0) {
+            this.lose();
+            return;
+          }
+        }
       }
     }
+
+    // Check apple collection
+    this.checkAppleCollection();
 
     // Update UI
     this.updateHUD();
     this.drawEntities();
 
     requestAnimationFrame((t) => this.gameLoop(t));
+  }
+
+  checkAppleCollection() {
+    for (let i = this.apples.length - 1; i >= 0; i--) {
+      const apple = this.apples[i];
+      if (this.distance(this.player, apple) < APPLE_COLLECT_DISTANCE) {
+        // Collect the apple
+        if (this.health < MAX_HEALTH) {
+          this.health++;
+        }
+        // Remove apple from array and SVG
+        if (apple.element) {
+          apple.element.remove();
+        }
+        this.apples.splice(i, 1);
+      }
+    }
   }
 
   updatePlayer(deltaTime) {
@@ -396,6 +510,9 @@ class ZombieGame {
   }
 
   updateZombie(zombie, deltaTime) {
+    // Update wobble time for stumbling effect
+    zombie.wobbleTime += deltaTime;
+
     if (zombie.path.length < 2) return false;
 
     const moveDistance = zombie.speed * deltaTime;
@@ -476,9 +593,22 @@ class ZombieGame {
       el.setAttribute('font-size', ENTITY_SIZE);
       el.setAttribute('text-anchor', 'middle');
       el.setAttribute('dominant-baseline', 'central');
-      el.textContent = '\u{1F9DF}';
+      el.textContent = zombie.emoji;
       this.svg.appendChild(el);
       zombie.element = el;
+    }
+
+    // Create apple elements
+    for (const apple of this.apples) {
+      const el = document.createElementNS(SVG_NS, 'text');
+      el.setAttribute('font-size', APPLE_SIZE);
+      el.setAttribute('text-anchor', 'middle');
+      el.setAttribute('dominant-baseline', 'central');
+      el.setAttribute('x', apple.x);
+      el.setAttribute('y', apple.y);
+      el.textContent = EMOJI_APPLE;
+      this.svg.appendChild(el);
+      apple.element = el;
     }
 
     // Player (drawn last, on top)
@@ -509,10 +639,27 @@ class ZombieGame {
     this.playerElement.setAttribute('x', this.player.x);
     this.playerElement.setAttribute('y', this.player.y);
 
+    // Update player emoji based on nearest zombie distance
+    let minDist = Infinity;
+    for (const zombie of this.zombies) {
+      const d = this.distance(this.player, zombie);
+      if (d < minDist) minDist = d;
+    }
+
+    if (minDist < SCARED_DISTANCE) {
+      this.playerElement.textContent = EMOJI_SCARED;
+    } else {
+      this.playerElement.textContent = EMOJI_NORMAL;
+    }
+
     for (const zombie of this.zombies) {
       if (zombie.element) {
-        zombie.element.setAttribute('x', zombie.x);
-        zombie.element.setAttribute('y', zombie.y);
+        // Calculate wobble offset for stumbling zombie effect
+        const wobbleX = Math.sin(zombie.wobbleTime * ZOMBIE_WOBBLE_SPEED + zombie.wobblePhase) * ZOMBIE_WOBBLE_AMOUNT;
+        const wobbleY = Math.cos(zombie.wobbleTime * ZOMBIE_WOBBLE_SPEED * 0.7 + zombie.wobblePhase) * ZOMBIE_WOBBLE_AMOUNT * 0.5;
+
+        zombie.element.setAttribute('x', zombie.x + wobbleX);
+        zombie.element.setAttribute('y', zombie.y + wobbleY);
       }
     }
   }
@@ -529,6 +676,20 @@ class ZombieGame {
       if (d < minDist) minDist = d;
     }
     document.getElementById('distance-value').textContent = Math.round(minDist);
+
+    // Update health bar
+    const healthBar = document.getElementById('health-bar');
+    if (healthBar) {
+      let healthDisplay = '';
+      for (let i = 0; i < MAX_HEALTH; i++) {
+        if (i < this.health) {
+          healthDisplay += EMOJI_APPLE;
+        } else {
+          healthDisplay += '\u{1F5A4}'; // 🖤 (black heart) for empty slots
+        }
+      }
+      healthBar.textContent = healthDisplay;
+    }
   }
 
   winRound() {
@@ -566,6 +727,10 @@ class ZombieGame {
 
   lose() {
     this.gameRunning = false;
+
+    // Change player emoji to dead
+    this.playerElement.textContent = EMOJI_DEAD;
+
     const overlay = document.getElementById('game-over');
     overlay.className = 'lose';
     document.getElementById('result-text').textContent = 'GAME OVER';
